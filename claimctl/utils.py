@@ -44,22 +44,22 @@ def run_ocr_on_page(doc: fitz.Document, page_num: int) -> str:
     """Run OCR on a PDF page using Tesseract."""
     config = get_config()
     page = doc[page_num]
-    
+
     # Save page as a temporary PNG
-    pix = page.get_pixmap(matrix=fitz.Matrix(300/72, 300/72))  # 300 dpi
+    pix = page.get_pixmap(matrix=fitz.Matrix(300 / 72, 300 / 72))  # 300 dpi
     cache_dir = Path(config.paths.DATA_DIR) / "cache"
     cache_dir.mkdir(exist_ok=True, parents=True)
-    
+
     temp_img_path = cache_dir / f"temp_ocr_{get_page_hash(doc.name, page_num)}.png"
     pix.save(str(temp_img_path))
-    
+
     # Run OCR
     text = pytesseract.image_to_string(str(temp_img_path))
-    
+
     # Clean up temp file
     if os.path.exists(temp_img_path):
         os.remove(temp_img_path)
-    
+
     return text
 
 
@@ -67,33 +67,154 @@ def save_page_image(doc: fitz.Document, page_num: int) -> str:
     """Save a page as a PNG image and return the path."""
     config = get_config()
     page = doc[page_num]
-    
+
     # Generate a filename based on the PDF name and page number
     pdf_name = Path(doc.name).stem
     pages_dir = Path(config.paths.DATA_DIR) / "pages"
     pages_dir.mkdir(exist_ok=True, parents=True)
-    
+
     # Create a high-quality image
-    pix = page.get_pixmap(matrix=fitz.Matrix(300/72, 300/72))  # 300 dpi
+    pix = page.get_pixmap(matrix=fitz.Matrix(300 / 72, 300 / 72))  # 300 dpi
     img_path = pages_dir / f"{pdf_name}_{page_num+1:04d}.png"  # 1-indexed for humans
     pix.save(str(img_path))
-    
+
     return str(img_path)
+
+
+def preprocess_image_for_ocr(image_path: str) -> str:
+    """Apply image preprocessing for better OCR results.
+
+    Applies:
+    - Contrast enhancement
+    - Deskew (straighten text)
+    """
+    try:
+        from PIL import Image, ImageEnhance, ImageFilter
+        import cv2
+        import numpy as np
+
+        # Load image
+        img = Image.open(image_path)
+
+        # Convert to grayscale if not already
+        if img.mode != "L":
+            img = img.convert("L")
+
+        # Enhance contrast
+        enhancer = ImageEnhance.Contrast(img)
+        img = enhancer.enhance(2.0)  # Increase contrast
+
+        # Apply slight sharpening
+        img = img.filter(ImageFilter.SHARPEN)
+
+        # Save preprocessed image
+        preprocessed_path = image_path.replace(".png", "_preprocessed.png")
+        img.save(preprocessed_path)
+
+        # Attempt deskew using OpenCV
+        try:
+            # Load with OpenCV
+            cv_img = cv2.imread(preprocessed_path, cv2.IMREAD_GRAYSCALE)
+
+            # Threshold to create binary image
+            _, binary = cv2.threshold(cv_img, 128, 255, cv2.THRESH_BINARY_INV)
+
+            # Find all contours
+            contours, _ = cv2.findContours(
+                binary, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE
+            )
+
+            # Find rotated rectangle for largest contour
+            if contours:
+                largest_contour = max(contours, key=cv2.contourArea)
+                rect = cv2.minAreaRect(largest_contour)
+                angle = rect[2]
+
+                # Determine if we need to correct the angle
+                if angle < -45:
+                    angle = 90 + angle
+
+                # Only deskew if angle is significant
+                if abs(angle) > 0.5:
+                    (h, w) = cv_img.shape[:2]
+                    center = (w // 2, h // 2)
+                    M = cv2.getRotationMatrix2D(center, angle, 1.0)
+                    rotated = cv2.warpAffine(
+                        cv_img,
+                        M,
+                        (w, h),
+                        flags=cv2.INTER_CUBIC,
+                        borderMode=cv2.BORDER_REPLICATE,
+                    )
+                    cv2.imwrite(preprocessed_path, rotated)
+        except Exception as e:
+            console.log(f"[yellow]Deskew failed: {str(e)}")
+
+        return preprocessed_path
+
+    except ImportError as e:
+        console.log(
+            f"[yellow]Image preprocessing skipped (missing libraries): {str(e)}"
+        )
+        return image_path
+    except Exception as e:
+        console.log(f"[yellow]Image preprocessing error: {str(e)}")
+        return image_path
+
+
+def run_ocr_on_page(doc: fitz.Document, page_num: int) -> str:
+    """Run OCR on a PDF page using Tesseract."""
+    config = get_config()
+    page = doc[page_num]
+
+    # Save page as a temporary PNG
+    pix = page.get_pixmap(matrix=fitz.Matrix(300 / 72, 300 / 72))  # 300 dpi
+    cache_dir = Path(config.paths.DATA_DIR) / "cache"
+    cache_dir.mkdir(exist_ok=True, parents=True)
+
+    temp_img_path = cache_dir / f"temp_ocr_{get_page_hash(doc.name, page_num)}.png"
+    pix.save(str(temp_img_path))
+
+    # Preprocess image
+    preprocessed_img_path = preprocess_image_for_ocr(str(temp_img_path))
+
+    # Run OCR with custom configuration
+    # Different settings based on document content (detect if it's primarily text or images)
+    is_text_heavy = len(extract_text_from_page(doc, page_num).strip()) > 50
+
+    if is_text_heavy:
+        # For text-heavy documents, optimize for text recognition
+        config_params = "--oem 3 --psm 3"  # Default Tesseract OCR Engine mode with automatic page segmentation
+    else:
+        # For image-heavy documents with sparse text
+        config_params = "--oem 3 --psm 6"  # Assume a single uniform block of text
+
+    text = pytesseract.image_to_string(preprocessed_img_path, config=config_params)
+
+    # Clean up temp files
+    if os.path.exists(temp_img_path):
+        os.remove(temp_img_path)
+    if preprocessed_img_path != str(temp_img_path) and os.path.exists(
+        preprocessed_img_path
+    ):
+        os.remove(preprocessed_img_path)
+
+    return text
 
 
 def process_page(doc: fitz.Document, page_num: int) -> Dict[str, str]:
     """Process a single page: extract text, save image."""
     # Extract text using PyMuPDF
     text = extract_text_from_page(doc, page_num)
-    
-    # If less than 20 characters found, run OCR
-    if len(text.strip()) < 20:
+
+    # Increased character threshold from 20 to 150
+    if len(text.strip()) < 150:
         console.log(f"Using OCR fallback for page {page_num+1}")
         text = run_ocr_on_page(doc, page_num)
-    
+
     # Save page as image
     img_path = save_page_image(doc, page_num)
-    
+
     return {
         "text": text,
         "image_path": img_path,

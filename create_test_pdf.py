@@ -7,6 +7,7 @@ try:
     import reportlab
 except ImportError:
     import subprocess
+
     subprocess.check_call(["pip", "install", "reportlab"])
 
 pdf_path = os.path.expanduser("~/test-pdfs/change_order_12.pdf")

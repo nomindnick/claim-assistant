@@ -38,7 +38,7 @@ def ingest_command(
         if path.suffix.lower() != ".pdf":
             console.print(f"[bold red]Error: {path} is not a PDF file")
             raise typer.Exit(1)
-    
+
     try:
         ingest_pdfs(pdf_paths)
     except Exception as e:
@@ -48,13 +48,13 @@ def ingest_command(
 
 @app.command("ask")
 def ask_command(
-    question: str = typer.Argument(..., help="Question to ask about the construction claim"),
+    question: str = typer.Argument(
+        ..., help="Question to ask about the construction claim"
+    ),
     top_k: Optional[int] = typer.Option(
         None, "--top-k", "-k", help="Number of most relevant documents to consider"
     ),
-    json: bool = typer.Option(
-        False, "--json", help="Output results in JSON format"
-    ),
+    json: bool = typer.Option(False, "--json", help="Output results in JSON format"),
     markdown: bool = typer.Option(
         False, "--md", help="Output results in Markdown format"
     ),
@@ -88,7 +88,7 @@ def config_command(
 def version_command() -> None:
     """Show version information."""
     console.print(f"claim-assistant v{__version__}")
-    
+
 
 # Add the commands to the app
 if __name__ == "__main__":
