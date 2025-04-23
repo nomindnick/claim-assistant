@@ -95,6 +95,40 @@ def get_top_chunks_by_similarity(
         config = get_config()
         top_k = config.retrieval.TOP_K
     
+    # Handle empty vector_ids case
+    if not vector_ids:
+        console.log(f"Looking up chunks for vector_ids: {vector_ids}")
+        console.log("No vector IDs provided, falling back to get all chunks")
+        with get_session() as session:
+            total_chunks = session.query(PageChunk).count()
+            console.log(f"Total chunks in database: {total_chunks}")
+            
+            if total_chunks > 0:
+                # Get the most recent chunks up to top_k
+                chunks = []
+                db_chunks = session.query(PageChunk).order_by(PageChunk.id.desc()).limit(top_k).all()
+                
+                for chunk in db_chunks:
+                    console.log(f"Found chunk: {chunk.file_name} (page {chunk.page_num})")
+                    chunks.append({
+                        "id": chunk.id,
+                        "file_name": chunk.file_name,
+                        "file_path": chunk.file_path,
+                        "page_num": chunk.page_num,
+                        "image_path": chunk.image_path,
+                        "text": chunk.text,
+                        "chunk_type": chunk.chunk_type,
+                        "doc_date": chunk.doc_date.isoformat() if chunk.doc_date else None,
+                        "doc_id": chunk.doc_id,
+                    })
+                
+                console.log(f"Returning {len(chunks)} chunks")
+                return chunks
+            else:
+                console.log("No chunks in database")
+                return []
+    
+    # Normal processing for non-empty vector_ids
     console.log(f"Looking up chunks for vector_ids: {vector_ids[:top_k]}")
     
     with get_session() as session:

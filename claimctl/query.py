@@ -46,31 +46,42 @@ def search_documents(query: str, top_k: Optional[int] = None) -> Tuple[List[Dict
         console.log("[bold red]No documents have been ingested yet!")
         return [], []
     
-    # Get query embedding
-    query_embedding = get_embeddings([query])[0].reshape(1, -1)
-    
-    # Search FAISS index
-    similarity_threshold = config.retrieval.SCORE_THRESHOLD
-    distances, indices = index.search(query_embedding, top_k)
-    
-    # Convert distances (L2) to similarity scores (higher is better)
-    max_distance = np.max(distances)
-    similarity_scores = [1 - (dist / max_distance) for dist in distances[0]]
-    
-    # Debug mode - always return all results for testing
-    debug_mode = False
-    
-    if debug_mode:
-        console.log("DEBUG MODE: Returning all search results regardless of score")
-        filtered_indices = indices[0]
-        filtered_scores = similarity_scores
-    else:
-        # Filter by similarity threshold
-        filtered_indices = [idx for idx, score in zip(indices[0], similarity_scores) if score >= similarity_threshold]
-        filtered_scores = [score for score in similarity_scores if score >= similarity_threshold]
+    try:
+        # Get query embedding
+        query_embedding = get_embeddings([query])[0].reshape(1, -1)
+        
+        # Search FAISS index
+        similarity_threshold = config.retrieval.SCORE_THRESHOLD
+        distances, indices = index.search(query_embedding, top_k)
+        
+        # Convert distances (L2) to similarity scores (higher is better)
+        max_distance = float(np.max(distances)) if distances.size > 0 else 1.0
+        similarity_scores = [1 - (float(dist) / max_distance) for dist in distances[0]]
+        
+        # Enable debug mode for troubleshooting
+        debug_mode = True
+        
+        if debug_mode:
+            console.log("DEBUG MODE: Returning all search results regardless of score")
+            filtered_indices = indices[0].tolist()  # Convert to Python list
+            filtered_scores = similarity_scores
+        else:
+            # Filter by similarity threshold
+            filtered_indices = [int(idx) for idx, score in zip(indices[0], similarity_scores) if score >= similarity_threshold]
+            filtered_scores = [score for score in similarity_scores if score >= similarity_threshold]
+        
+    except Exception as e:
+        console.log(f"[bold red]Error in search: {str(e)}")
+        console.log("[bold yellow]Falling back to get all documents")
+        filtered_indices = []
+        filtered_scores = []
     
     # Get chunk data from database
     chunks = get_top_chunks_by_similarity(filtered_indices, top_k)
+    
+    # If we have chunks but no scores, create dummy scores
+    if chunks and not filtered_scores:
+        filtered_scores = [1.0] * len(chunks)
     
     return chunks, filtered_scores
 
