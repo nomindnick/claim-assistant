@@ -1,0 +1,8 @@
+# Sample golden test set for construction claim questions
+# Format: Question: Expected file:page
+
+"Where is Change Order 12 described?": "change_order_12.pdf:3"
+"What was the original contract value?": "contract.pdf:1"
+"When was the project schedule delayed?": "delay_notice.pdf:1"
+"Who approved the additional work on the foundation?": "approvals.pdf:4"
+"What does section 3.2 of the contract say about change orders?": "contract.pdf:7"

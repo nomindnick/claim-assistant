@@ -1,0 +1,42 @@
+--- a/claimctl/ingest.py
++++ b/claimctl/ingest.py
+@@ -137,6 +137,8 @@
+     # Initialize document
+     try:
+         doc = fitz.open(pdf_path)
++        console.log(f"Successfully opened {pdf_path}, {len(doc)} pages")
++        console.log(f"Using OpenAI API key: {config.openai.API_KEY[:5]}...")
+     except Exception as e:
+         console.log(f"[bold red]Error opening {pdf_path}: {str(e)}")
+         progress.update(task_id, advance=1, status=f"Error: {str(e)}")
+@@ -175,7 +177,12 @@
+             chunk_type = classify_chunk(text)
+             
+             # Prepare DB entry
++            console.log("Preparing database entry...")
++            
++            # Instead of classifying with the API during debug, use a default value
++            # chunk_type = classify_chunk(text)
++            chunk_type = "ChangeOrder"  # Temporarily hardcode to skip API call
++            
+             chunk_data = {
+                 "file_path": str(pdf_path),
+                 "file_name": pdf_path.name,
+@@ -189,8 +196,14 @@
+             }
+             
+             # Generate embedding
+-            embedding = get_embeddings([text])[0]
+-            
++            try:
++                console.log("Generating embedding...")
++                embedding = get_embeddings([text])[0]
++                console.log("Embedding generated successfully")
++            except Exception as e:
++                console.log(f"[bold red]Error generating embedding: {str(e)}")
++                embedding = np.zeros(1536, dtype=np.float32)  # Fallback to zeros for debugging
++                
+             # Add to FAISS index
+             index.add(np.array([embedding], dtype=np.float32))
+             
+EOL < /dev/null
