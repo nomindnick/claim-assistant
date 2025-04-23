@@ -68,15 +68,25 @@ INDEX_DIR = ./index
 [openai]
 API_KEY = your_openai_api_key
 MODEL = gpt-4o-mini
-EMBED_MODEL = text-embedding-3-small
+EMBED_MODEL = text-embedding-3-large
 
 [retrieval]
 TOP_K = 6
-SCORE_THRESHOLD = 0.75
+SCORE_THRESHOLD = 0.6
+CONTEXT_SIZE = 2000
+ANSWER_CONFIDENCE = True
 
 [chunking]
-SUBCHUNK_SIZE = 800
-SUBCHUNK_OVERLAP = 100
+CHUNK_SIZE = 400
+CHUNK_OVERLAP = 100
+
+[bm25]
+K1 = 1.5
+B = 0.75
+WEIGHT = 0.3
+
+[project]
+DEFAULT_PROJECT = 
 ```
 
 You can also use environment variables to override these settings:

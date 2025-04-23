@@ -1,0 +1,26 @@
+[paths]
+DATA_DIR = ./data
+INDEX_DIR = ./index
+
+[openai]
+API_KEY = your_openai_api_key_here
+MODEL = gpt-4o-mini
+EMBED_MODEL = text-embedding-3-large
+
+[retrieval]
+TOP_K = 6
+SCORE_THRESHOLD = 0.6
+CONTEXT_SIZE = 2000
+ANSWER_CONFIDENCE = True
+
+[chunking]
+CHUNK_SIZE = 400
+CHUNK_OVERLAP = 100
+
+[bm25]
+K1 = 1.5
+B = 0.75
+WEIGHT = 0.3
+
+[project]
+DEFAULT_PROJECT = 

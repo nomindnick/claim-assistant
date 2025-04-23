@@ -115,11 +115,11 @@ def load_config() -> configparser.ConfigParser:
         config.read(config_path)
 
         # Add any missing sections from defaults
-        for section, values in config.defaults().items():
-            if not config.has_section(section):
-                config.add_section(section)
-                for key, value in values.items():
-                    config.set(section, key, value)
+        for section in config.sections():
+            if section in config.defaults():
+                for key, value in config.defaults()[section].items():
+                    if not config.has_option(section, key):
+                        config.set(section, key, value)
 
     # Save config if it doesn't exist
     if not os.path.exists(config_path):
@@ -152,7 +152,9 @@ def get_config() -> Config:
         TOP_K=config_parser.getint("retrieval", "TOP_K"),
         SCORE_THRESHOLD=config_parser.getfloat("retrieval", "SCORE_THRESHOLD"),
         CONTEXT_SIZE=config_parser.getint("retrieval", "CONTEXT_SIZE", fallback=2000),
-        ANSWER_CONFIDENCE=config_parser.getboolean("retrieval", "ANSWER_CONFIDENCE", fallback=True),
+        ANSWER_CONFIDENCE=config_parser.getboolean(
+            "retrieval", "ANSWER_CONFIDENCE", fallback=True
+        ),
     )
 
     # Parse chunking config

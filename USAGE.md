@@ -112,11 +112,12 @@ The system provides several enhancements for working with results:
 ### Configuration Options
 
 You can edit `~/.claimctl.ini` to change:
-- Data storage locations
-- OpenAI model selection
-- Retrieval parameters (number of results, relevance threshold)
-- Chunking parameters
-- Context window size for document text
+- Data storage locations (DATA_DIR, INDEX_DIR)
+- OpenAI model selection (MODEL, EMBED_MODEL)
+- Retrieval parameters (TOP_K, SCORE_THRESHOLD, CONTEXT_SIZE, ANSWER_CONFIDENCE)
+- Chunking parameters (CHUNK_SIZE, CHUNK_OVERLAP)
+- BM25 search parameters (K1, B, WEIGHT)
+- Project settings (DEFAULT_PROJECT)
 
 ### Environment Variables
 

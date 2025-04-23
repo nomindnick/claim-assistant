@@ -72,8 +72,13 @@ pip install -e .
 # Create config file if not exists
 if [ ! -f ~/.claimctl.ini ]; then
     echo "Creating default config file at ~/.claimctl.ini"
-    cp claimctl.ini.sample ~/.claimctl.ini
-    echo "⚠️ Please edit ~/.claimctl.ini to set your OpenAI API key"
+    if [ -f claimctl.ini.sample ]; then
+        cp claimctl.ini.sample ~/.claimctl.ini
+        echo "⚠️ Please edit ~/.claimctl.ini to set your OpenAI API key"
+    else
+        echo "⚠️ Sample config file not found, using CLI to create default config"
+        # The CLI will create a default config automatically
+    fi
 fi
 
 # Initialize directories
