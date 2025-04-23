@@ -33,6 +33,8 @@ class RetrievalConfig:
 
     TOP_K: int
     SCORE_THRESHOLD: float
+    CONTEXT_SIZE: int  # Character limit per chunk for context window
+    ANSWER_CONFIDENCE: bool  # Whether to include confidence indicators
 
 
 @dataclass
@@ -92,6 +94,8 @@ def load_config() -> configparser.ConfigParser:
     config["retrieval"] = {
         "TOP_K": "6",
         "SCORE_THRESHOLD": "0.6",
+        "CONTEXT_SIZE": "2000",
+        "ANSWER_CONFIDENCE": "True",
     }
     config["chunking"] = {
         "CHUNK_SIZE": "400",
@@ -147,6 +151,8 @@ def get_config() -> Config:
     retrieval_config = RetrievalConfig(
         TOP_K=config_parser.getint("retrieval", "TOP_K"),
         SCORE_THRESHOLD=config_parser.getfloat("retrieval", "SCORE_THRESHOLD"),
+        CONTEXT_SIZE=config_parser.getint("retrieval", "CONTEXT_SIZE", fallback=2000),
+        ANSWER_CONFIDENCE=config_parser.getboolean("retrieval", "ANSWER_CONFIDENCE", fallback=True),
     )
 
     # Parse chunking config
@@ -222,6 +228,8 @@ def show_config() -> Dict[str, Any]:
         "retrieval": {
             "TOP_K": config.retrieval.TOP_K,
             "SCORE_THRESHOLD": config.retrieval.SCORE_THRESHOLD,
+            "CONTEXT_SIZE": config.retrieval.CONTEXT_SIZE,
+            "ANSWER_CONFIDENCE": config.retrieval.ANSWER_CONFIDENCE,
         },
         "chunking": {
             "CHUNK_SIZE": config.chunking.CHUNK_SIZE,
