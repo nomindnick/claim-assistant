@@ -43,6 +43,7 @@ exhibits/
 # Configuration with potential secrets
 ~/.claimctl.ini
 
+
 # Exception for sample files
 !tests/fixtures/sample_pdfs/
 
