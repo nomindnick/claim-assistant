@@ -52,23 +52,25 @@ def search_documents(query: str, top_k: Optional[int] = None) -> Tuple[List[Dict
         
         # Search FAISS index
         similarity_threshold = config.retrieval.SCORE_THRESHOLD
-        distances, indices = index.search(query_embedding, top_k)
         
-        # Convert distances (L2) to similarity scores (higher is better)
-        max_distance = float(np.max(distances)) if distances.size > 0 else 1.0
-        similarity_scores = [1 - (float(dist) / max_distance) for dist in distances[0]]
-        
-        # Enable debug mode for troubleshooting
-        debug_mode = True
-        
-        if debug_mode:
-            console.log("DEBUG MODE: Returning all search results regardless of score")
-            filtered_indices = indices[0].tolist()  # Convert to Python list
-            filtered_scores = similarity_scores
-        else:
+        if index.ntotal > 0:
+            distances, indices = index.search(query_embedding, min(top_k, index.ntotal))
+            
+            # Convert distances (L2) to similarity scores (higher is better)
+            max_distance = float(np.max(distances)) if distances.size > 0 else 1.0
+            similarity_scores = [1 - (float(dist) / max_distance) for dist in distances[0]]
+            
             # Filter by similarity threshold
             filtered_indices = [int(idx) for idx, score in zip(indices[0], similarity_scores) if score >= similarity_threshold]
             filtered_scores = [score for score in similarity_scores if score >= similarity_threshold]
+            
+            if not filtered_indices:
+                console.log("[yellow]No results above threshold, returning top results regardless of score")
+                filtered_indices = indices[0].tolist()  # Convert to Python list
+                filtered_scores = similarity_scores
+        else:
+            filtered_indices = []
+            filtered_scores = []
         
     except Exception as e:
         console.log(f"[bold red]Error in search: {str(e)}")

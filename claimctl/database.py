@@ -138,12 +138,14 @@ def get_top_chunks_by_similarity(
         
         chunks = []
         for idx in vector_ids[:top_k]:
-            # For testing, we'll check all records if the exact ID doesn't match
+            # FAISS vector IDs are 0-indexed, but database IDs are 1-indexed
             chunk = session.query(PageChunk).filter(PageChunk.id == idx + 1).first()
             
             if not chunk and total_chunks > 0:
-                console.log(f"Chunk with ID {idx + 1} not found, using first available chunk")
-                chunk = session.query(PageChunk).first()
+                console.log(f"Chunk with ID {idx + 1} not found, falling back to more reliable lookup")
+                # Try to find the chunk by position in the database
+                if 0 <= idx < total_chunks:
+                    chunk = session.query(PageChunk).order_by(PageChunk.id).offset(idx).limit(1).first()
             
             if chunk:
                 console.log(f"Found chunk: {chunk.file_name} (page {chunk.page_num})")
