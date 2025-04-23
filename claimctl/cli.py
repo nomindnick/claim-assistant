@@ -29,22 +29,71 @@ def ingest_command(
         ...,
         help="Path(s) to PDF files to ingest",
         exists=True,
-        dir_okay=False,
+        dir_okay=True,  # Allow directories to support batch processing
         resolve_path=True,
     ),
     project: Optional[str] = typer.Option(
         None, "--project", "-p", help="Project name to associate with documents"
     ),
+    batch_size: int = typer.Option(
+        5, "--batch-size", "-b", help="Number of PDFs to process in each batch"
+    ),
+    resume: bool = typer.Option(
+        True, "--resume/--no-resume", help="Resume processing from previous run if it was interrupted"
+    ),
+    recursive: bool = typer.Option(
+        False, "--recursive", "-r", help="Recursively process directories"
+    ),
 ) -> None:
     """Ingest PDF files into the claim assistant database."""
-    # Ensure all files are PDFs
+    # Expand directories to individual PDF files if needed
+    expanded_paths = []
+    
     for path in pdf_paths:
-        if path.suffix.lower() != ".pdf":
-            console.print(f"[bold red]Error: {path} is not a PDF file")
-            raise typer.Exit(1)
-
+        if path.is_dir():
+            # Find all PDFs in the directory
+            if recursive:
+                # Find PDFs recursively in all subdirectories
+                for pdf_path in path.glob("**/*.pdf"):
+                    expanded_paths.append(pdf_path)
+            else:
+                # Find PDFs only in the top directory
+                for pdf_path in path.glob("*.pdf"):
+                    expanded_paths.append(pdf_path)
+        else:
+            # Individual file (verify it's a PDF)
+            if path.suffix.lower() != ".pdf":
+                console.print(f"[bold red]Error: {path} is not a PDF file")
+                raise typer.Exit(1)
+            expanded_paths.append(path)
+    
+    # Sort paths for consistent processing order
+    expanded_paths.sort()
+    
+    # Check if we found any PDFs
+    if not expanded_paths:
+        console.print("[bold red]Error: No PDF files found")
+        raise typer.Exit(1)
+        
+    console.print(f"[bold green]Found {len(expanded_paths)} PDF files to process")
+    
+    # Confirm if large number of PDFs
+    if len(expanded_paths) > 10:
+        confirm = typer.confirm(
+            f"Are you sure you want to process {len(expanded_paths)} PDF files?", 
+            default=True
+        )
+        if not confirm:
+            console.print("[bold yellow]Ingestion cancelled")
+            raise typer.Exit(0)
+    
     try:
-        ingest_pdfs(pdf_paths, project_name=project)
+        ingest_pdfs(
+            expanded_paths, 
+            project_name=project, 
+            batch_size=batch_size, 
+            resume_on_error=resume
+        )
     except Exception as e:
         console.print(f"[bold red]Error: {str(e)}")
         raise typer.Exit(1)

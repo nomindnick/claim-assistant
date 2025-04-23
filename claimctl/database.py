@@ -53,6 +53,7 @@ class Page(Base):
     page_num = sa.Column(sa.Integer, nullable=False)
     page_hash = sa.Column(sa.String, nullable=False, index=True, unique=True)
     image_path = sa.Column(sa.String, nullable=False)
+    thumbnail_path = sa.Column(sa.String, nullable=True)  # Path to thumbnail image
     processed_at = sa.Column(sa.DateTime, default=datetime.utcnow)
 
     # Define relationship with document
@@ -154,6 +155,7 @@ def save_page_chunk(chunk_data: Dict[str, Any]) -> None:
             page_num = chunk_data.pop("page_num")
             page_hash = chunk_data.pop("page_hash")
             image_path = chunk_data.pop("image_path")
+            thumbnail_path = chunk_data.pop("thumbnail_path", None)  # May not exist in older data
 
             # Extra metadata that can be applied to the document
             project_name = chunk_data.pop("project_name", None)
@@ -187,6 +189,7 @@ def save_page_chunk(chunk_data: Dict[str, Any]) -> None:
                     page_num=page_num,
                     page_hash=page_hash,
                     image_path=image_path,
+                    thumbnail_path=thumbnail_path,
                 )
                 session.add(page)
                 session.flush()  # Ensure ID is assigned
@@ -288,6 +291,7 @@ def get_chunk_by_faiss_id(faiss_id: int) -> Optional[Dict[str, Any]]:
                 "file_path": document.file_path,
                 "page_num": page.page_num,
                 "image_path": page.image_path,
+                "thumbnail_path": page.thumbnail_path,
                 "chunk_id": chunk.chunk_id,
                 "chunk_index": chunk.chunk_index,
                 "total_chunks": chunk.total_chunks,
@@ -366,6 +370,7 @@ def get_top_chunks_by_similarity(
                             "chunk_index": chunk.chunk_index,
                             "total_chunks": chunk.total_chunks,
                             "image_path": page.image_path,
+                            "thumbnail_path": page.thumbnail_path,
                             "text": chunk.text,
                             "chunk_type": chunk.chunk_type,
                             "confidence": chunk.confidence,
@@ -422,6 +427,7 @@ def get_top_chunks_by_similarity(
                         "chunk_index": chunk.chunk_index,
                         "total_chunks": chunk.total_chunks,
                         "image_path": page.image_path,
+                        "thumbnail_path": page.thumbnail_path,
                         "text": chunk.text,
                         "chunk_type": chunk.chunk_type,
                         "confidence": chunk.confidence,
@@ -494,6 +500,7 @@ def get_chunks_by_metadata(
                     "chunk_index": chunk.chunk_index,
                     "total_chunks": chunk.total_chunks,
                     "image_path": page.image_path,
+                    "thumbnail_path": page.thumbnail_path,
                     "text": chunk.text,
                     "chunk_type": chunk.chunk_type,
                     "confidence": chunk.confidence,

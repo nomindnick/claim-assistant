@@ -1,4 +1,5 @@
 import os
+
 from openai import OpenAI
 
 # Read API key from config file

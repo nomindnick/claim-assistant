@@ -194,6 +194,8 @@ def display_results(
     markdown_output: bool = False,
 ) -> None:
     """Display the search results and answer."""
+    from .utils import highlight_text
+    
     if json_output:
         # Format results as JSON
         results = {
@@ -210,6 +212,7 @@ def display_results(
                     "parties_involved": chunk.get("parties_involved"),
                     "text": chunk["text"][:200] + "...",  # Truncate for readability
                     "image_path": chunk.get("image_path"),
+                    "thumbnail_path": chunk.get("thumbnail_path"),
                 }
                 for chunk, score in zip(chunks, scores)
             ],
@@ -232,7 +235,15 @@ def display_results(
                 md += f"- **Date:** {chunk['doc_date']}\n"
             if chunk.get("parties_involved"):
                 md += f"- **Parties:** {chunk['parties_involved']}\n"
-            md += f"- **Preview:** {chunk['text'][:200]}...\n\n"
+            
+            # Highlight relevant terms in the preview text
+            preview_text = highlight_text(chunk['text'][:250], question)
+            md += f"- **Preview:** {preview_text}...\n\n"
+            
+            # Include thumbnail if available
+            if chunk.get("thumbnail_path"):
+                md += f"![Document Preview]({chunk['thumbnail_path']})\n\n"
+        
         console.print(md)
         return
 
@@ -252,8 +263,12 @@ def display_results(
     table.add_column("Project")
     table.add_column("Date")
     table.add_column("Relevance")
+    table.add_column("Sort", justify="center")
 
-    for i, (chunk, score) in enumerate(zip(chunks, scores)):
+    # Default sort is by relevance
+    sorted_chunks_scores = list(zip(chunks, scores))
+    
+    for i, (chunk, score) in enumerate(sorted_chunks_scores):
         table.add_row(
             str(i + 1),
             chunk["file_name"],
@@ -262,15 +277,42 @@ def display_results(
             chunk.get("project_name", ""),
             str(chunk.get("doc_date", "")),
             f"{score:.2f}",
+            "↓" if i == 0 else "",  # Arrow indicates current sort column
         )
 
     console.print(table)
-    console.print("\nCommands: (f)ollow-up, (c)ompare, (m)ore like this, (o)pen PDF, (e)xport image, (q)uit")
+    
+    # Display detailed view of first result with highlighted text and thumbnail
+    if chunks:
+        first_chunk = chunks[0]
+        console.rule("[bold cyan]Detail View")
+        
+        # Show metadata for the chunk
+        console.print(f"[bold]Source: {first_chunk['file_name']} (Page {first_chunk['page_num']})")
+        if first_chunk.get("doc_date"):
+            console.print(f"[bold]Date: {first_chunk.get('doc_date')}")
+        if first_chunk.get("project_name"):
+            console.print(f"[bold]Project: {first_chunk.get('project_name')}")
+        
+        # Show thumbnail if available
+        if first_chunk.get("thumbnail_path") and os.path.exists(first_chunk["thumbnail_path"]):
+            # In a terminal environment, we can't display images directly
+            # But we notify the user that an image is available
+            console.print(f"[bold]Thumbnail: {first_chunk['thumbnail_path']}")
+            console.print("[italic]Use (v) command to view image")
+        
+        # Display highlighted text
+        console.print("\n[bold]Excerpt with highlighted terms:")
+        highlighted = highlight_text(first_chunk['text'][:500], question)
+        console.print(highlighted + "...")
+    
+    console.print("\nCommands: (f)ollow-up, (c)ompare, (m)ore like this, (s)ort, (v)iew image, (o)pen PDF, (e)xport image, (q)uit")
 
 
 def handle_user_commands(
     question: str,
     chunks: List[Dict[str, Any]],
+    scores: List[float],  # Add scores parameter to support sorting
     top_k: Optional[int] = None,
     doc_type: Optional[str] = None,
     date_from: Optional[str] = None,
@@ -280,9 +322,17 @@ def handle_user_commands(
     search_type: str = "hybrid",
 ) -> None:
     """Handle user commands for interacting with search results."""
+    from .utils import highlight_text
+    
     previous_answer_context = None
+    
+    # Make a copy of the original chunks and scores
+    current_chunks = list(chunks)
+    current_scores = list(scores)
+    current_sort = "relevance"  # Track current sort order
+    
     while True:
-        console.print("\nCommands: (f)ollow-up, (c)ompare, (m)ore like this, (o)pen PDF, (e)xport image, (q)uit")
+        console.print("\nCommands: (f)ollow-up, (c)ompare, (m)ore like this, (s)ort, (v)iew image, (o)pen PDF, (e)xport image, (q)uit")
         choice = Prompt.ask("Enter command").lower()
 
         if choice == "q":
@@ -459,6 +509,166 @@ def handle_user_commands(
             except Exception as e:
                 console.print(f"[bold red]Error finding similar documents: {str(e)}")
 
+        elif choice.startswith("s"):
+            # Sort/filter results
+            console.print("[bold]Sort/Filter Options:")
+            console.print("1. Sort by relevance (default)")
+            console.print("2. Sort by date (newest first)")
+            console.print("3. Sort by date (oldest first)")
+            console.print("4. Sort by document type")
+            console.print("5. Filter by document type")
+            console.print("6. Reset to original order")
+            
+            sort_choice = Prompt.ask("Select option", choices=["1", "2", "3", "4", "5", "6"], default="1")
+            
+            if sort_choice == "1":
+                # Sort by relevance (original order)
+                current_chunks = list(chunks)
+                current_scores = list(scores)
+                current_sort = "relevance"
+                console.print("[bold green]Results sorted by relevance")
+                
+                # Re-display sorted results
+                display_results(question, "See above for original answer", current_chunks, current_scores)
+                
+            elif sort_choice == "2":
+                # Sort by date (newest first)
+                date_sorted = []
+                for c in current_chunks:
+                    date_str = c.get("doc_date")
+                    # Assign a default old date if no date is available
+                    if date_str:
+                        try:
+                            date_obj = datetime.fromisoformat(date_str)
+                            date_sorted.append((c, date_obj))
+                        except (ValueError, TypeError):
+                            # If we can't parse the date, put it at the end
+                            date_sorted.append((c, datetime(1900, 1, 1)))
+                    else:
+                        date_sorted.append((c, datetime(1900, 1, 1)))
+                
+                # Sort by date (newest first)
+                date_sorted.sort(key=lambda x: x[1], reverse=True)
+                current_chunks = [item[0] for item in date_sorted]
+                # Adjust scores to match new order
+                current_scores = [scores[chunks.index(chunk)] for chunk in current_chunks]
+                current_sort = "date-newest"
+                
+                console.print("[bold green]Results sorted by date (newest first)")
+                # Re-display sorted results
+                display_results(question, "See above for original answer", current_chunks, current_scores)
+                
+            elif sort_choice == "3":
+                # Sort by date (oldest first)
+                date_sorted = []
+                for c in current_chunks:
+                    date_str = c.get("doc_date")
+                    # Assign a default recent date if no date is available
+                    if date_str:
+                        try:
+                            date_obj = datetime.fromisoformat(date_str)
+                            date_sorted.append((c, date_obj))
+                        except (ValueError, TypeError):
+                            # If we can't parse the date, put it at the end
+                            date_sorted.append((c, datetime(9999, 12, 31)))
+                    else:
+                        date_sorted.append((c, datetime(9999, 12, 31)))
+                
+                # Sort by date (oldest first)
+                date_sorted.sort(key=lambda x: x[1])
+                current_chunks = [item[0] for item in date_sorted]
+                # Adjust scores to match new order
+                current_scores = [scores[chunks.index(chunk)] for chunk in current_chunks]
+                current_sort = "date-oldest"
+                
+                console.print("[bold green]Results sorted by date (oldest first)")
+                # Re-display sorted results
+                display_results(question, "See above for original answer", current_chunks, current_scores)
+                
+            elif sort_choice == "4":
+                # Sort by document type
+                type_sorted = sorted(current_chunks, key=lambda x: x.get("chunk_type", "ZZZ"))
+                current_chunks = type_sorted
+                # Adjust scores to match new order
+                current_scores = [scores[chunks.index(chunk)] for chunk in current_chunks]
+                current_sort = "type"
+                
+                console.print("[bold green]Results sorted by document type")
+                # Re-display sorted results
+                display_results(question, "See above for original answer", current_chunks, current_scores)
+                
+            elif sort_choice == "5":
+                # Filter by document type
+                # Get unique document types
+                doc_types = sorted(set(c.get("chunk_type", "Unknown") for c in chunks))
+                
+                # Display document types
+                console.print("[bold]Available document types:")
+                for i, dtype in enumerate(doc_types):
+                    console.print(f"{i+1}. {dtype}")
+                    
+                type_idx = Prompt.ask("Select document type #", default="1")
+                try:
+                    type_idx = int(type_idx) - 1
+                    if 0 <= type_idx < len(doc_types):
+                        selected_type = doc_types[type_idx]
+                        # Filter chunks by document type
+                        filtered_chunks = [c for c in chunks if c.get("chunk_type") == selected_type]
+                        if filtered_chunks:
+                            current_chunks = filtered_chunks
+                            # Adjust scores to match new filtered list
+                            current_scores = [scores[chunks.index(chunk)] for chunk in current_chunks]
+                            console.print(f"[bold green]Filtered to show only {selected_type} documents")
+                            # Re-display filtered results
+                            display_results(question, "See above for original answer", current_chunks, current_scores)
+                        else:
+                            console.print(f"[bold red]No documents of type {selected_type} found")
+                    else:
+                        console.print("[bold red]Invalid document type selection")
+                except ValueError:
+                    console.print("[bold red]Please enter a valid number")
+            
+            elif sort_choice == "6":
+                # Reset to original order
+                current_chunks = list(chunks)
+                current_scores = list(scores)
+                current_sort = "relevance"
+                console.print("[bold green]Reset to original order")
+                # Re-display original results
+                display_results(question, "See above for original answer", current_chunks, current_scores)
+                
+        elif choice.startswith("v"):
+            # View image - extract source number if provided
+            parts = choice.split()
+            src_num = 1  # Default to first source
+            if len(parts) > 1 and parts[1].isdigit():
+                src_num = int(parts[1])
+                
+            if 1 <= src_num <= len(current_chunks):
+                chunk = current_chunks[src_num - 1]
+                # Check if image is available
+                image_path = chunk.get("image_path")
+                if not image_path or not os.path.exists(image_path):
+                    console.print("[bold yellow]No image available for this document")
+                    continue
+                    
+                # Open image viewer
+                try:
+                    if os.name == "posix":  # Linux/Mac
+                        cmd = ["xdg-open", image_path]
+                        subprocess.Popen(cmd)
+                        console.print(f"Opening image: {image_path}")
+                    elif os.name == "nt":  # Windows
+                        cmd = ["start", "", image_path]
+                        subprocess.Popen(cmd, shell=True)
+                        console.print(f"Opening image: {image_path}")
+                    else:
+                        console.print("Unsupported operating system")
+                except Exception as e:
+                    console.print(f"[bold red]Error opening image: {str(e)}")
+            else:
+                console.print(f"[bold red]Invalid source number: {src_num}")
+                
         elif choice.startswith("o"):
             # Extract source number if provided (e.g., "o 2" opens source #2)
             parts = choice.split()
@@ -466,8 +676,8 @@ def handle_user_commands(
             if len(parts) > 1 and parts[1].isdigit():
                 src_num = int(parts[1])
 
-            if 1 <= src_num <= len(chunks):
-                chunk = chunks[src_num - 1]
+            if 1 <= src_num <= len(current_chunks):
+                chunk = current_chunks[src_num - 1]
                 # Open PDF to the specific page
                 try:
                     file_path = chunk["file_path"]
@@ -566,6 +776,7 @@ def query_documents(
         handle_user_commands(
             question,
             chunks,
+            scores,  # Pass scores to support sorting
             top_k,
             doc_type,
             date_from,

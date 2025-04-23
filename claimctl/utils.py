@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Tuple, Union
 import fitz  # PyMuPDF
 import pytesseract
 from rich.console import Console
-from rich.progress import Progress, TextColumn, BarColumn, TaskID
+from rich.progress import BarColumn, Progress, TaskID, TextColumn
 
 from .config import get_config
 
@@ -63,22 +63,32 @@ def run_ocr_on_page(doc: fitz.Document, page_num: int) -> str:
     return text
 
 
-def save_page_image(doc: fitz.Document, page_num: int) -> str:
-    """Save a page as a PNG image and return the path."""
+def save_page_image(doc: fitz.Document, page_num: int) -> Dict[str, str]:
+    """Save page images (full and thumbnail) and return their paths."""
     config = get_config()
     page = doc[page_num]
 
     # Generate a filename based on the PDF name and page number
     pdf_name = Path(doc.name).stem
     pages_dir = Path(config.paths.DATA_DIR) / "pages"
+    thumbs_dir = Path(config.paths.DATA_DIR) / "thumbnails"
     pages_dir.mkdir(exist_ok=True, parents=True)
+    thumbs_dir.mkdir(exist_ok=True, parents=True)
 
-    # Create a high-quality image
-    pix = page.get_pixmap(matrix=fitz.Matrix(300 / 72, 300 / 72))  # 300 dpi
+    # Create a high-quality image for full view
+    full_pix = page.get_pixmap(matrix=fitz.Matrix(300 / 72, 300 / 72))  # 300 dpi
     img_path = pages_dir / f"{pdf_name}_{page_num+1:04d}.png"  # 1-indexed for humans
-    pix.save(str(img_path))
+    full_pix.save(str(img_path))
 
-    return str(img_path)
+    # Create a thumbnail version
+    thumb_pix = page.get_pixmap(matrix=fitz.Matrix(72 / 72, 72 / 72))  # 72 dpi (screen resolution)
+    thumb_path = thumbs_dir / f"{pdf_name}_{page_num+1:04d}_thumb.png"
+    thumb_pix.save(str(thumb_path))
+
+    return {
+        "image_path": str(img_path),
+        "thumbnail_path": str(thumb_path)
+    }
 
 
 def preprocess_image_for_ocr(image_path: str) -> str:
@@ -89,9 +99,9 @@ def preprocess_image_for_ocr(image_path: str) -> str:
     - Deskew (straighten text)
     """
     try:
-        from PIL import Image, ImageEnhance, ImageFilter
         import cv2
         import numpy as np
+        from PIL import Image, ImageEnhance, ImageFilter
 
         # Load image
         img = Image.open(image_path)
@@ -202,8 +212,8 @@ def run_ocr_on_page(doc: fitz.Document, page_num: int) -> str:
     return text
 
 
-def process_page(doc: fitz.Document, page_num: int) -> Dict[str, str]:
-    """Process a single page: extract text, save image."""
+def process_page(doc: fitz.Document, page_num: int) -> Dict[str, Any]:
+    """Process a single page: extract text, save image and thumbnail."""
     # Extract text using PyMuPDF
     text = extract_text_from_page(doc, page_num)
 
@@ -212,14 +222,62 @@ def process_page(doc: fitz.Document, page_num: int) -> Dict[str, str]:
         console.log(f"Using OCR fallback for page {page_num+1}")
         text = run_ocr_on_page(doc, page_num)
 
-    # Save page as image
-    img_path = save_page_image(doc, page_num)
+    # Save page as image and thumbnail
+    image_paths = save_page_image(doc, page_num)
 
     return {
         "text": text,
-        "image_path": img_path,
+        "image_path": image_paths["image_path"],
+        "thumbnail_path": image_paths["thumbnail_path"],
         "page_hash": get_page_hash(doc.name, page_num),
     }
+
+
+def highlight_text(text: str, query: str) -> str:
+    """Highlight query terms in text with formatting for display.
+    
+    Args:
+        text: The original text
+        query: The search query
+        
+    Returns:
+        Text with query terms wrapped in rich formatting
+    """
+    if not query or not text:
+        return text
+        
+    # Break the query into individual terms, ignoring common words
+    stop_words = {"a", "an", "the", "and", "or", "but", "in", "on", "of", "is", "are", "was", "were", "to", "for"}
+    query_terms = set()
+    
+    # Add phrases (multi-word terms in quotes)
+    phrase_matches = re.findall(r'"([^"]+)"', query)
+    for phrase in phrase_matches:
+        query_terms.add(phrase.lower())
+        # Remove phrases from the query for individual word processing
+        query = query.replace(f'"{phrase}"', '')
+    
+    # Add individual significant words
+    for word in re.findall(r'\b\w{3,}\b', query.lower()):
+        if word not in stop_words:
+            query_terms.add(word)
+    
+    # Sort terms by length (longest first) to avoid partial matches
+    sorted_terms = sorted(query_terms, key=len, reverse=True)
+    
+    # Highlight each term with rich formatting
+    highlighted_text = text
+    for term in sorted_terms:
+        # Create a regex that matches whole words and is case-insensitive
+        if len(term.split()) > 1:  # Multi-word phrase
+            pattern = re.compile(re.escape(term), re.IGNORECASE)
+        else:  # Single word - match whole words only
+            pattern = re.compile(r'\b' + re.escape(term) + r'\b', re.IGNORECASE)
+            
+        # Replace with highlighted version
+        highlighted_text = pattern.sub(lambda m: f"[bold yellow]{m.group(0)}[/bold yellow]", highlighted_text)
+    
+    return highlighted_text
 
 
 def create_progress(description: str) -> Progress:
