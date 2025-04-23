@@ -3,20 +3,20 @@
 import json
 import os
 import subprocess
+from datetime import date, datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union, Any
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import faiss
 import numpy as np
 from openai import OpenAI
 from rich.console import Console
 from rich.markdown import Markdown
-from rich.table import Table
 from rich.prompt import Prompt
+from rich.table import Table
 
 from .config import get_config
-from .database import get_top_chunks_by_similarity
-from .ingest import create_or_load_faiss_index, get_embeddings
+from .search import search_documents as search_docs
 from .utils import console
 
 # Question answering prompt
@@ -33,70 +33,73 @@ Question: {question}
 """
 
 
+def parse_date(date_str: str) -> Optional[date]:
+    """Try to parse a date string in various formats."""
+    formats = [
+        "%Y-%m-%d",
+        "%m/%d/%Y",
+        "%d/%m/%Y",
+        "%m-%d-%Y",
+        "%d-%m-%Y",
+        "%b %d, %Y",
+        "%B %d, %Y",
+        "%d %b %Y",
+        "%d %B %Y",
+    ]
+
+    for fmt in formats:
+        try:
+            return datetime.strptime(date_str, fmt).date()
+        except ValueError:
+            continue
+
+    return None
+
+
 def search_documents(
-    query: str, top_k: Optional[int] = None
+    query: str,
+    top_k: Optional[int] = None,
+    doc_type: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    project_name: Optional[str] = None,
+    parties: Optional[str] = None,
+    search_type: str = "hybrid",
 ) -> Tuple[List[Dict[str, Any]], List[float]]:
     """Search for documents relevant to the query."""
     config = get_config()
     if not top_k:
         top_k = config.retrieval.TOP_K
 
-    # Load FAISS index
-    index = create_or_load_faiss_index()
+    # Prepare metadata filters
+    metadata_filters = {}
+    if doc_type:
+        metadata_filters["document_type"] = doc_type
+    if project_name:
+        metadata_filters["project_name"] = project_name
+    if parties:
+        metadata_filters["parties_involved"] = parties
 
-    if index.ntotal == 0:
-        console.log("[bold red]No documents have been ingested yet!")
-        return [], []
+    # Parse date filters
+    if date_from:
+        parsed_date = parse_date(date_from)
+        if parsed_date:
+            metadata_filters["date_from"] = parsed_date
 
-    try:
-        # Get query embedding
-        query_embedding = get_embeddings([query])[0].reshape(1, -1)
+    if date_to:
+        parsed_date = parse_date(date_to)
+        if parsed_date:
+            metadata_filters["date_to"] = parsed_date
 
-        # Search FAISS index
-        similarity_threshold = config.retrieval.SCORE_THRESHOLD
+    # Execute search
+    chunks, scores = search_docs(
+        query=query,
+        top_k=top_k,
+        metadata_filters=metadata_filters if metadata_filters else None,
+        search_type=search_type,
+    )
 
-        if index.ntotal > 0:
-            distances, indices = index.search(query_embedding, min(top_k, index.ntotal))
-
-            # Convert distances (L2) to similarity scores using cosine similarity approximation
-            # Since FAISS uses L2 distance and embeddings are normalized, we can convert to cosine similarity
-            # Cosine similarity = 1 - (L2_distance^2 / 2)
-            similarity_scores = [1 - (float(dist) ** 2 / 2) for dist in distances[0]]
-
-            # Filter by similarity threshold
-            filtered_indices = [
-                int(idx)
-                for idx, score in zip(indices[0], similarity_scores)
-                if score >= similarity_threshold
-            ]
-            filtered_scores = [
-                score for score in similarity_scores if score >= similarity_threshold
-            ]
-
-            if not filtered_indices:
-                console.log(
-                    "[yellow]No results above threshold, returning top results regardless of score"
-                )
-                filtered_indices = indices[0].tolist()  # Convert to Python list
-                filtered_scores = similarity_scores
-        else:
-            filtered_indices = []
-            filtered_scores = []
-
-    except Exception as e:
-        console.log(f"[bold red]Error in search: {str(e)}")
-        console.log("[bold yellow]Falling back to get all documents")
-        filtered_indices = []
-        filtered_scores = []
-
-    # Get chunk data from database
-    chunks = get_top_chunks_by_similarity(filtered_indices, top_k)
-
-    # If we have chunks but no scores, create dummy scores
-    if chunks and not filtered_scores:
-        filtered_scores = [1.0] * len(chunks)
-
-    return chunks, filtered_scores
+    return chunks, scores
 
 
 def answer_question(question: str, chunks: List[Dict[str, Any]]) -> str:
@@ -110,8 +113,14 @@ def answer_question(question: str, chunks: List[Dict[str, Any]]) -> str:
             f"DOCUMENT {i+1}: {chunk['file_name']} (Page {chunk['page_num']})\n"
         )
         formatted_chunks += f"Document Type: {chunk['chunk_type']}\n"
-        if chunk["doc_id"]:
+        if chunk.get("doc_id"):
             formatted_chunks += f"Document ID: {chunk['doc_id']}\n"
+        if chunk.get("doc_date"):
+            formatted_chunks += f"Date: {chunk['doc_date']}\n"
+        if chunk.get("project_name"):
+            formatted_chunks += f"Project: {chunk['project_name']}\n"
+        if chunk.get("parties_involved"):
+            formatted_chunks += f"Parties: {chunk['parties_involved']}\n"
         formatted_chunks += f"Text: {chunk['text'][:800]}...\n\n"
 
     # Create prompt
@@ -161,8 +170,11 @@ def display_results(
                     "page_num": chunk["page_num"],
                     "chunk_type": chunk["chunk_type"],
                     "score": score,
+                    "project_name": chunk.get("project_name"),
+                    "doc_date": chunk.get("doc_date"),
+                    "parties_involved": chunk.get("parties_involved"),
                     "text": chunk["text"][:200] + "...",  # Truncate for readability
-                    "image_path": chunk["image_path"],
+                    "image_path": chunk.get("image_path"),
                 }
                 for chunk, score in zip(chunks, scores)
             ],
@@ -179,6 +191,12 @@ def display_results(
             )
             md += f"- **Type:** {chunk['chunk_type']}\n"
             md += f"- **Relevance:** {score:.2f}\n"
+            if chunk.get("project_name"):
+                md += f"- **Project:** {chunk['project_name']}\n"
+            if chunk.get("doc_date"):
+                md += f"- **Date:** {chunk['doc_date']}\n"
+            if chunk.get("parties_involved"):
+                md += f"- **Parties:** {chunk['parties_involved']}\n"
             md += f"- **Preview:** {chunk['text'][:200]}...\n\n"
         console.print(md)
         return
@@ -196,6 +214,8 @@ def display_results(
     table.add_column("File")
     table.add_column("Page")
     table.add_column("Type")
+    table.add_column("Project")
+    table.add_column("Date")
     table.add_column("Relevance")
 
     for i, (chunk, score) in enumerate(zip(chunks, scores)):
@@ -204,6 +224,8 @@ def display_results(
             chunk["file_name"],
             str(chunk["page_num"]),
             chunk["chunk_type"],
+            chunk.get("project_name", ""),
+            str(chunk.get("doc_date", "")),
             f"{score:.2f}",
         )
 
@@ -259,7 +281,10 @@ def handle_user_commands(chunks: List[Dict[str, Any]]) -> None:
                 chunk = chunks[src_num - 1]
                 # Export image to exhibits directory
                 try:
-                    image_path = chunk["image_path"]
+                    image_path = chunk.get("image_path")
+                    if not image_path:
+                        console.print("[bold yellow]No image available for this chunk")
+                        continue
 
                     # Create exhibits directory if it doesn't exist
                     exhibits_dir = Path("./exhibits")
@@ -286,10 +311,25 @@ def query_documents(
     top_k: Optional[int] = None,
     json_output: bool = False,
     markdown_output: bool = False,
+    doc_type: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    project_name: Optional[str] = None,
+    parties: Optional[str] = None,
+    search_type: str = "hybrid",
 ) -> None:
     """Query documents based on a natural language question."""
     # Search for relevant documents
-    chunks, scores = search_documents(question, top_k)
+    chunks, scores = search_documents(
+        question,
+        top_k,
+        doc_type,
+        date_from,
+        date_to,
+        project_name,
+        parties,
+        search_type,
+    )
 
     if not chunks:
         console.print(

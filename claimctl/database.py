@@ -3,16 +3,69 @@
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Dict, Any, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import sqlalchemy as sa
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session, relationship, sessionmaker
+from sqlalchemy.sql import func
 
 from .config import get_config
 
 # Initialize SQLAlchemy
 Base = declarative_base()
+
+
+class Document(Base):
+    """Model representing a document."""
+
+    __tablename__ = "documents"
+
+    id = sa.Column(sa.Integer, primary_key=True)
+    file_path = sa.Column(sa.String, nullable=False, unique=True)
+    file_name = sa.Column(sa.String, nullable=False)
+    # New metadata fields
+    project_name = sa.Column(sa.String, nullable=True)
+    document_date = sa.Column(sa.Date, nullable=True)
+    document_type = sa.Column(sa.String, nullable=True)
+    document_id = sa.Column(sa.String, nullable=True)
+    parties_involved = sa.Column(sa.String, nullable=True)
+    # Versioning fields
+    version = sa.Column(sa.Integer, default=1, nullable=False)
+    created_at = sa.Column(sa.DateTime, default=datetime.utcnow)
+    updated_at = sa.Column(
+        sa.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    # Define relationship with pages
+    pages = relationship(
+        "Page", back_populates="document", cascade="all, delete-orphan"
+    )
+
+
+class Page(Base):
+    """Model representing a page of a document."""
+
+    __tablename__ = "pages"
+
+    id = sa.Column(sa.Integer, primary_key=True)
+    document_id = sa.Column(sa.Integer, sa.ForeignKey("documents.id"), nullable=False)
+    page_num = sa.Column(sa.Integer, nullable=False)
+    page_hash = sa.Column(sa.String, nullable=False, index=True, unique=True)
+    image_path = sa.Column(sa.String, nullable=False)
+    processed_at = sa.Column(sa.DateTime, default=datetime.utcnow)
+
+    # Define relationship with document
+    document = relationship("Document", back_populates="pages")
+    # Define relationship with chunks
+    chunks = relationship(
+        "PageChunk", back_populates="page", cascade="all, delete-orphan"
+    )
+
+    # Ensure page numbers are unique within a document
+    __table_args__ = (
+        sa.UniqueConstraint("document_id", "page_num", name="uix_document_page"),
+    )
 
 
 class PageChunk(Base):
@@ -21,27 +74,34 @@ class PageChunk(Base):
     __tablename__ = "page_chunks"
 
     id = sa.Column(sa.Integer, primary_key=True)
-    file_path = sa.Column(sa.String, nullable=False)
-    file_name = sa.Column(sa.String, nullable=False)
-    page_num = sa.Column(sa.Integer, nullable=False)
-    page_hash = sa.Column(sa.String, nullable=False, index=True)
-    chunk_id = sa.Column(sa.String, nullable=True, index=True, unique=True)
+    page_id = sa.Column(sa.Integer, sa.ForeignKey("pages.id"), nullable=False)
     chunk_index = sa.Column(sa.Integer, nullable=True)
     total_chunks = sa.Column(sa.Integer, nullable=True)
-    image_path = sa.Column(sa.String, nullable=False)
     text = sa.Column(sa.Text, nullable=False)
     chunk_type = sa.Column(sa.String, nullable=True)
     confidence = sa.Column(sa.Integer, nullable=True)
 
-    # Metadata fields
+    # Add FAISS vector ID directly (critical for ensuring proper ID mapping)
+    faiss_id = sa.Column(sa.Integer, nullable=True, index=True)
+
+    # Document metadata fields that can be different per chunk
     doc_date = sa.Column(sa.Date, nullable=True)
     doc_id = sa.Column(sa.String, nullable=True)
+
+    # Add a unique chunk_id
+    chunk_id = sa.Column(sa.String, nullable=True, index=True, unique=True)
+
+    # Add timestamp for indexing/sorting
     processed_at = sa.Column(sa.DateTime, default=datetime.utcnow)
 
-    # Add index for common queries
+    # Define relationship with page
+    page = relationship("Page", back_populates="chunks")
+
+    # Add indices for common queries
     __table_args__ = (
-        sa.Index("idx_file_page", "file_name", "page_num"),
         sa.Index("idx_chunk_type", "chunk_type"),
+        sa.Index("idx_doc_date", "doc_date"),
+        sa.Index("idx_faiss_id", "faiss_id"),
     )
 
 
@@ -77,23 +137,177 @@ def is_page_processed(page_hash: str) -> bool:
     for this page hash, as an indicator of whether this page has been processed.
     """
     with get_session() as session:
-        return session.query(
-            sa.exists().where(PageChunk.page_hash == page_hash)
-        ).scalar()
+        page = session.query(Page).filter(Page.page_hash == page_hash).first()
+        return page is not None
 
 
 def save_page_chunk(chunk_data: Dict[str, Any]) -> None:
     """Save a page chunk to the database."""
     with get_session() as session:
-        chunk = PageChunk(**chunk_data)
-        session.add(chunk)
+        try:
+            # Start transaction
+            transaction = session.begin_nested()
+
+            # Extract document and page data from chunk data
+            file_path = chunk_data.pop("file_path")
+            file_name = chunk_data.pop("file_name")
+            page_num = chunk_data.pop("page_num")
+            page_hash = chunk_data.pop("page_hash")
+            image_path = chunk_data.pop("image_path")
+
+            # Extra metadata that can be applied to the document
+            project_name = chunk_data.pop("project_name", None)
+            document_type = chunk_data.get("chunk_type", None)
+            document_id = chunk_data.get("doc_id", None)
+            doc_date = chunk_data.get("doc_date", None)
+
+            # Check if document exists, create if not
+            document = (
+                session.query(Document).filter(Document.file_path == file_path).first()
+            )
+
+            if not document:
+                document = Document(
+                    file_path=file_path,
+                    file_name=file_name,
+                    project_name=project_name,
+                    document_type=document_type,
+                    document_id=document_id,
+                    document_date=doc_date,
+                )
+                session.add(document)
+                session.flush()  # Ensure ID is assigned
+
+            # Check if page exists, create if not
+            page = session.query(Page).filter(Page.page_hash == page_hash).first()
+
+            if not page:
+                page = Page(
+                    document_id=document.id,
+                    page_num=page_num,
+                    page_hash=page_hash,
+                    image_path=image_path,
+                )
+                session.add(page)
+                session.flush()  # Ensure ID is assigned
+
+            # Create the page chunk
+            chunk = PageChunk(page_id=page.id, **chunk_data)
+            session.add(chunk)
+
+            # Commit transaction
+            transaction.commit()
+
+        except Exception as e:
+            # Rollback transaction on error
+            if transaction.is_active:
+                transaction.rollback()
+            raise e
+
+        # Commit the session
         session.commit()
+
+
+def save_faiss_id_mapping(chunk_id: str, faiss_id: int) -> None:
+    """Save the mapping between chunk_id and FAISS vector ID."""
+    with get_session() as session:
+        try:
+            # Find the chunk by chunk_id
+            chunk = (
+                session.query(PageChunk).filter(PageChunk.chunk_id == chunk_id).first()
+            )
+
+            if chunk:
+                # Update the FAISS ID
+                chunk.faiss_id = faiss_id
+                session.commit()
+        except Exception as e:
+            session.rollback()
+            raise e
+
+
+def get_document_by_path(file_path: str) -> Optional[Dict[str, Any]]:
+    """Get a document by file path."""
+    with get_session() as session:
+        document = (
+            session.query(Document).filter(Document.file_path == file_path).first()
+        )
+
+        if document:
+            return {
+                "id": document.id,
+                "file_path": document.file_path,
+                "file_name": document.file_name,
+                "project_name": document.project_name,
+                "document_type": document.document_type,
+                "document_id": document.document_id,
+                "document_date": document.document_date,
+                "parties_involved": document.parties_involved,
+                "version": document.version,
+                "created_at": document.created_at,
+                "updated_at": document.updated_at,
+            }
+
+        return None
+
+
+def update_document_metadata(file_path: str, metadata: Dict[str, Any]) -> None:
+    """Update document metadata."""
+    with get_session() as session:
+        document = (
+            session.query(Document).filter(Document.file_path == file_path).first()
+        )
+
+        if document:
+            for key, value in metadata.items():
+                if hasattr(document, key):
+                    setattr(document, key, value)
+
+            # Increment version
+            document.version += 1
+
+            session.commit()
+
+
+def get_chunk_by_faiss_id(faiss_id: int) -> Optional[Dict[str, Any]]:
+    """Get a chunk by FAISS ID."""
+    with get_session() as session:
+        chunk = session.query(PageChunk).filter(PageChunk.faiss_id == faiss_id).first()
+
+        if chunk:
+            # Join with page and document
+            page = session.query(Page).filter(Page.id == chunk.page_id).first()
+            document = (
+                session.query(Document).filter(Document.id == page.document_id).first()
+            )
+
+            return {
+                "id": chunk.id,
+                "faiss_id": chunk.faiss_id,
+                "file_name": document.file_name,
+                "file_path": document.file_path,
+                "page_num": page.page_num,
+                "image_path": page.image_path,
+                "chunk_id": chunk.chunk_id,
+                "chunk_index": chunk.chunk_index,
+                "total_chunks": chunk.total_chunks,
+                "text": chunk.text,
+                "chunk_type": chunk.chunk_type,
+                "confidence": chunk.confidence,
+                "doc_date": chunk.doc_date.isoformat() if chunk.doc_date else None,
+                "doc_id": chunk.doc_id,
+                "project_name": document.project_name,
+                "document_type": document.document_type,
+                "parties_involved": document.parties_involved,
+            }
+
+        return None
 
 
 def get_total_pages() -> int:
     """Get the total number of pages in the database."""
     with get_session() as session:
-        return session.query(PageChunk).count()
+        return session.query(Page).count()
 
 
 def get_top_chunks_by_similarity(
@@ -115,50 +329,53 @@ def get_top_chunks_by_similarity(
             console.log(f"Total chunks in database: {total_chunks}")
 
             if total_chunks > 0:
-                # Get the most recent chunks up to top_k
                 chunks = []
+                # Get the most recent chunks up to top_k
                 db_chunks = (
                     session.query(PageChunk)
-                    .order_by(PageChunk.id.desc())
+                    .order_by(PageChunk.processed_at.desc())
                     .limit(top_k)
                     .all()
                 )
 
                 for chunk in db_chunks:
+                    # Get page and document information
+                    page = session.query(Page).filter(Page.id == chunk.page_id).first()
+                    if not page:
+                        continue
+
+                    document = (
+                        session.query(Document)
+                        .filter(Document.id == page.document_id)
+                        .first()
+                    )
+                    if not document:
+                        continue
+
                     console.log(
-                        f"Found chunk: {chunk.file_name} (page {chunk.page_num})"
+                        f"Found chunk: {document.file_name} (page {page.page_num})"
                     )
                     chunks.append(
                         {
                             "id": chunk.id,
-                            "file_name": chunk.file_name,
-                            "file_path": chunk.file_path,
-                            "page_num": chunk.page_num,
-                            "chunk_id": (
-                                chunk.chunk_id if hasattr(chunk, "chunk_id") else None
-                            ),
-                            "chunk_index": (
-                                chunk.chunk_index
-                                if hasattr(chunk, "chunk_index")
-                                else None
-                            ),
-                            "total_chunks": (
-                                chunk.total_chunks
-                                if hasattr(chunk, "total_chunks")
-                                else None
-                            ),
-                            "image_path": chunk.image_path,
+                            "faiss_id": chunk.faiss_id,
+                            "file_name": document.file_name,
+                            "file_path": document.file_path,
+                            "page_num": page.page_num,
+                            "chunk_id": chunk.chunk_id,
+                            "chunk_index": chunk.chunk_index,
+                            "total_chunks": chunk.total_chunks,
+                            "image_path": page.image_path,
                             "text": chunk.text,
                             "chunk_type": chunk.chunk_type,
-                            "confidence": (
-                                chunk.confidence
-                                if hasattr(chunk, "confidence")
-                                else None
-                            ),
+                            "confidence": chunk.confidence,
                             "doc_date": (
                                 chunk.doc_date.isoformat() if chunk.doc_date else None
                             ),
                             "doc_id": chunk.doc_id,
+                            "project_name": document.project_name,
+                            "document_type": document.document_type,
+                            "parties_involved": document.parties_involved,
                         }
                     )
 
@@ -172,62 +389,122 @@ def get_top_chunks_by_similarity(
     console.log(f"Looking up chunks for vector_ids: {vector_ids[:top_k]}")
 
     with get_session() as session:
-        # Count total chunks in database
-        total_chunks = session.query(PageChunk).count()
-        console.log(f"Total chunks in database: {total_chunks}")
-
         chunks = []
-        for idx in vector_ids[:top_k]:
-            # FAISS vector IDs are 0-indexed, but database IDs are 1-indexed
-            chunk = session.query(PageChunk).filter(PageChunk.id == idx + 1).first()
-
-            if not chunk and total_chunks > 0:
-                console.log(
-                    f"Chunk with ID {idx + 1} not found, falling back to more reliable lookup"
-                )
-                # Try to find the chunk by position in the database
-                if 0 <= idx < total_chunks:
-                    chunk = (
-                        session.query(PageChunk)
-                        .order_by(PageChunk.id)
-                        .offset(idx)
-                        .limit(1)
-                        .first()
-                    )
+        for faiss_id in vector_ids[:top_k]:
+            # Look up by faiss_id directly
+            chunk = (
+                session.query(PageChunk).filter(PageChunk.faiss_id == faiss_id).first()
+            )
 
             if chunk:
-                console.log(f"Found chunk: {chunk.file_name} (page {chunk.page_num})")
+                # Get page and document information
+                page = session.query(Page).filter(Page.id == chunk.page_id).first()
+                if not page:
+                    continue
+
+                document = (
+                    session.query(Document)
+                    .filter(Document.id == page.document_id)
+                    .first()
+                )
+                if not document:
+                    continue
+
+                console.log(f"Found chunk: {document.file_name} (page {page.page_num})")
                 chunks.append(
                     {
                         "id": chunk.id,
-                        "file_name": chunk.file_name,
-                        "file_path": chunk.file_path,
-                        "page_num": chunk.page_num,
-                        "chunk_id": (
-                            chunk.chunk_id if hasattr(chunk, "chunk_id") else None
-                        ),
-                        "chunk_index": (
-                            chunk.chunk_index if hasattr(chunk, "chunk_index") else None
-                        ),
-                        "total_chunks": (
-                            chunk.total_chunks
-                            if hasattr(chunk, "total_chunks")
-                            else None
-                        ),
-                        "image_path": chunk.image_path,
+                        "faiss_id": chunk.faiss_id,
+                        "file_name": document.file_name,
+                        "file_path": document.file_path,
+                        "page_num": page.page_num,
+                        "chunk_id": chunk.chunk_id,
+                        "chunk_index": chunk.chunk_index,
+                        "total_chunks": chunk.total_chunks,
+                        "image_path": page.image_path,
                         "text": chunk.text,
                         "chunk_type": chunk.chunk_type,
-                        "confidence": (
-                            chunk.confidence if hasattr(chunk, "confidence") else None
-                        ),
+                        "confidence": chunk.confidence,
                         "doc_date": (
                             chunk.doc_date.isoformat() if chunk.doc_date else None
                         ),
                         "doc_id": chunk.doc_id,
+                        "project_name": document.project_name,
+                        "document_type": document.document_type,
+                        "parties_involved": document.parties_involved,
                     }
                 )
             else:
-                console.log(f"No chunk found for idx {idx}")
+                console.log(f"No chunk found for FAISS ID {faiss_id}")
 
         console.log(f"Returning {len(chunks)} chunks")
         return chunks
+
+
+def get_chunks_by_metadata(
+    metadata_filters: Dict[str, Any], limit: int = 10
+) -> List[Dict[str, Any]]:
+    """Get chunks based on metadata filters."""
+    with get_session() as session:
+        query = session.query(PageChunk)
+
+        # Join tables for document metadata
+        query = query.join(Page, Page.id == PageChunk.page_id)
+        query = query.join(Document, Document.id == Page.document_id)
+
+        # Apply filters
+        for key, value in metadata_filters.items():
+            if key == "document_type" and value:
+                query = query.filter(Document.document_type == value)
+            elif key == "project_name" and value:
+                query = query.filter(Document.project_name == value)
+            elif key == "parties_involved" and value:
+                query = query.filter(Document.parties_involved.like(f"%{value}%"))
+            elif key == "chunk_type" and value:
+                query = query.filter(PageChunk.chunk_type == value)
+            elif key == "date_from" and value:
+                query = query.filter(PageChunk.doc_date >= value)
+            elif key == "date_to" and value:
+                query = query.filter(PageChunk.doc_date <= value)
+
+        # Get results
+        chunks = query.order_by(PageChunk.processed_at.desc()).limit(limit).all()
+
+        result = []
+        for chunk in chunks:
+            # Get page and document information
+            page = session.query(Page).filter(Page.id == chunk.page_id).first()
+            if not page:
+                continue
+
+            document = (
+                session.query(Document).filter(Document.id == page.document_id).first()
+            )
+            if not document:
+                continue
+
+            result.append(
+                {
+                    "id": chunk.id,
+                    "faiss_id": chunk.faiss_id,
+                    "file_name": document.file_name,
+                    "file_path": document.file_path,
+                    "page_num": page.page_num,
+                    "chunk_id": chunk.chunk_id,
+                    "chunk_index": chunk.chunk_index,
+                    "total_chunks": chunk.total_chunks,
+                    "image_path": page.image_path,
+                    "text": chunk.text,
+                    "chunk_type": chunk.chunk_type,
+                    "confidence": chunk.confidence,
+                    "doc_date": (
+                        chunk.doc_date.isoformat() if chunk.doc_date else None
+                    ),
+                    "doc_id": chunk.doc_id,
+                    "project_name": document.project_name,
+                    "document_type": document.document_type,
+                    "parties_involved": document.parties_involved,
+                }
+            )
+
+        return result

@@ -2,14 +2,15 @@
 
 import os
 import sys
+from datetime import date
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List, Optional
 
 import typer
 from rich.console import Console
 
 from . import __version__
-from .config import get_config, ensure_dirs, show_config
+from .config import ensure_dirs, get_config, show_config
 from .ingest import ingest_pdfs
 from .query import query_documents
 from .utils import console
@@ -31,6 +32,9 @@ def ingest_command(
         dir_okay=False,
         resolve_path=True,
     ),
+    project: Optional[str] = typer.Option(
+        None, "--project", "-p", help="Project name to associate with documents"
+    ),
 ) -> None:
     """Ingest PDF files into the claim assistant database."""
     # Ensure all files are PDFs
@@ -40,7 +44,7 @@ def ingest_command(
             raise typer.Exit(1)
 
     try:
-        ingest_pdfs(pdf_paths)
+        ingest_pdfs(pdf_paths, project_name=project)
     except Exception as e:
         console.print(f"[bold red]Error: {str(e)}")
         raise typer.Exit(1)
@@ -58,10 +62,39 @@ def ask_command(
     markdown: bool = typer.Option(
         False, "--md", help="Output results in Markdown format"
     ),
+    doc_type: Optional[str] = typer.Option(
+        None, "--type", "-t", help="Filter by document type"
+    ),
+    project: Optional[str] = typer.Option(
+        None, "--project", "-p", help="Filter by project name"
+    ),
+    date_from: Optional[str] = typer.Option(
+        None, "--from", help="Filter documents from this date (YYYY-MM-DD)"
+    ),
+    date_to: Optional[str] = typer.Option(
+        None, "--to", help="Filter documents to this date (YYYY-MM-DD)"
+    ),
+    parties: Optional[str] = typer.Option(
+        None, "--parties", help="Filter by parties involved"
+    ),
+    search_type: str = typer.Option(
+        "hybrid", "--search", "-s", help="Search type: hybrid, vector, or keyword"
+    ),
 ) -> None:
     """Ask a question about the construction claim."""
     try:
-        query_documents(question, top_k, json, markdown)
+        query_documents(
+            question,
+            top_k,
+            json,
+            markdown,
+            doc_type,
+            date_from,
+            date_to,
+            project,
+            parties,
+            search_type,
+        )
     except Exception as e:
         console.print(f"[bold red]Error: {str(e)}")
         raise typer.Exit(1)

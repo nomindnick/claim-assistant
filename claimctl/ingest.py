@@ -4,7 +4,7 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union, Any
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import faiss
 import fitz  # PyMuPDF
@@ -14,21 +14,21 @@ from langchain_openai import OpenAIEmbeddings
 from openai import OpenAI
 from rich.progress import Progress, TaskID
 
-from .config import get_config, ensure_dirs
+from .config import ensure_dirs, get_config
 from .database import (
+    get_database_engine,
     init_database,
     is_page_processed,
+    save_faiss_id_mapping,
     save_page_chunk,
-    get_database_engine,
 )
 from .utils import (
     calculate_sha256,
+    console,
+    create_progress,
     get_page_hash,
     process_page,
-    create_progress,
-    console,
 )
-
 
 # Chunk type classification prompt
 CHUNK_TYPE_PROMPT = """
@@ -70,6 +70,21 @@ ID_PATTERNS = [
     r"(?:Contract|Agreement)\s+#?[\w-]+",  # Contract #A-123
 ]
 
+# Project name extraction patterns
+PROJECT_PATTERNS = [
+    r"Project(?:\s+Name)?:\s*([\w\s\-,\.&]+)(?:\n|$)",
+    r"Project\s*ID:?\s*([\w\-\d]+)(?:\n|$)",
+    r"(?:RE:|REGARDING:)\s*([\w\s\-,\.&]+)(?:PROJECT|CONSTRUCTION)(?:\n|$)",
+]
+
+# Parties involved extraction patterns
+PARTIES_PATTERNS = [
+    r"(?:Owner|Client|Customer):\s*([\w\s\-,\.&]+)(?:\n|$)",
+    r"(?:Contractor|Builder):\s*([\w\s\-,\.&]+)(?:\n|$)",
+    r"(?:Subcontractor):\s*([\w\s\-,\.&]+)(?:\n|$)",
+    r"(?:Architect|Designer|Engineer):\s*([\w\s\-,\.&]+)(?:\n|$)",
+]
+
 
 def extract_dates(text: str) -> List[str]:
     """Extract dates from text using regex patterns."""
@@ -87,6 +102,28 @@ def extract_document_ids(text: str) -> List[str]:
         matches = re.findall(pattern, text)
         ids.extend(matches)
     return ids
+
+
+def extract_project_name(text: str) -> Optional[str]:
+    """Extract project name from text using regex patterns."""
+    for pattern in PROJECT_PATTERNS:
+        match = re.search(pattern, text)
+        if match:
+            return match.group(1).strip()
+    return None
+
+
+def extract_parties_involved(text: str) -> Optional[str]:
+    """Extract parties involved from text using regex patterns."""
+    parties = []
+    for pattern in PARTIES_PATTERNS:
+        match = re.search(pattern, text)
+        if match:
+            parties.append(match.group(1).strip())
+
+    if parties:
+        return "; ".join(parties)
+    return None
 
 
 def classify_chunk(text: str) -> Tuple[str, int]:
@@ -352,7 +389,12 @@ def chunk_text(text: str, chunk_size: int = 400, chunk_overlap: int = 100) -> Li
         return [text]
 
 
-def process_pdf(pdf_path: Path, progress: Progress, task_id: TaskID) -> None:
+def process_pdf(
+    pdf_path: Path,
+    progress: Progress,
+    task_id: TaskID,
+    project_name: Optional[str] = None,
+) -> None:
     """Process a PDF file: extract text, metadata, generate embeddings."""
     config = get_config()
     console.log(f"Processing {pdf_path}")
@@ -372,85 +414,110 @@ def process_pdf(pdf_path: Path, progress: Progress, task_id: TaskID) -> None:
     total_pages = len(doc)
     progress.update(task_id, total=total_pages, status="Starting")
 
-    for page_num in range(total_pages):
-        progress.update(task_id, advance=0, status=f"Page {page_num+1}/{total_pages}")
-
-        # Generate unique hash for this page
-        page_hash = get_page_hash(pdf_path, page_num)
-
-        # Skip if already processed
-        if is_page_processed(page_hash):
-            console.log(f"Skipping page {page_num+1} (already processed)")
-            progress.update(task_id, advance=1, status=f"Skipped (duplicate)")
-            continue
-
-        # Process page
-        try:
-            page_data = process_page(doc, page_num)
-            text = page_data["text"]
-
-            # Extract metadata
-            dates = extract_dates(text)
-            doc_ids = extract_document_ids(text)
-
-            # Classify chunk
-            chunk_type, confidence = classify_chunk(text)
-
-            # Create chunks for better semantic search
-            chunk_size = config.chunking.CHUNK_SIZE
-            chunk_overlap = config.chunking.CHUNK_OVERLAP
-
-            # Only chunk text if it exceeds the minimum length
-            text_chunks = chunk_text(text, chunk_size, chunk_overlap)
-            console.log(f"Created {len(text_chunks)} chunks from page {page_num+1}")
-
-            # Process each chunk
-            for i, chunk_text in enumerate(text_chunks):
-                # Create unique ID for this chunk
-                chunk_id = f"{page_hash}_{i}"
-
-                # Prepare DB entry
-                chunk_data = {
-                    "file_path": str(pdf_path),
-                    "file_name": pdf_path.name,
-                    "page_num": page_num + 1,  # 1-indexed for humans
-                    "page_hash": page_hash,
-                    "chunk_id": chunk_id,
-                    "chunk_index": i,
-                    "total_chunks": len(text_chunks),
-                    "image_path": page_data["image_path"],
-                    "text": chunk_text,
-                    "chunk_type": chunk_type,
-                    "confidence": confidence,
-                    "doc_date": dates[0] if dates else None,
-                    "doc_id": doc_ids[0] if doc_ids else None,
-                }
-
-                # Generate embedding
-                embedding = get_embeddings([chunk_text])[0]
-
-                # Add to FAISS index
-                index.add(np.array([embedding], dtype=np.float32))
-
-                # Save to database
-                save_page_chunk(chunk_data)
-
+    # Begin transaction - we'll save the index at the end only if all pages process successfully
+    try:
+        for page_num in range(total_pages):
             progress.update(
-                task_id, advance=1, status=f"Processed {chunk_type} ({confidence}%)"
+                task_id, advance=0, status=f"Page {page_num+1}/{total_pages}"
             )
 
-        except Exception as e:
-            console.log(f"[bold red]Error processing page {page_num+1}: {str(e)}")
-            progress.update(task_id, advance=1, status=f"Error: {str(e)}")
+            # Generate unique hash for this page
+            page_hash = get_page_hash(pdf_path, page_num)
+
+            # Skip if already processed
+            if is_page_processed(page_hash):
+                console.log(f"Skipping page {page_num+1} (already processed)")
+                progress.update(task_id, advance=1, status=f"Skipped (duplicate)")
+                continue
+
+            # Process page
+            try:
+                page_data = process_page(doc, page_num)
+                text = page_data["text"]
+
+                # Extract metadata
+                dates = extract_dates(text)
+                doc_ids = extract_document_ids(text)
+
+                # Extract project name if not provided
+                if not project_name:
+                    extracted_project = extract_project_name(text)
+                    if extracted_project:
+                        project_name = extracted_project
+
+                # Extract parties involved
+                parties_involved = extract_parties_involved(text)
+
+                # Classify chunk
+                chunk_type, confidence = classify_chunk(text)
+
+                # Create chunks for better semantic search
+                chunk_size = config.chunking.CHUNK_SIZE
+                chunk_overlap = config.chunking.CHUNK_OVERLAP
+
+                # Only chunk text if it exceeds the minimum length
+                text_chunks = chunk_text(text, chunk_size, chunk_overlap)
+                console.log(f"Created {len(text_chunks)} chunks from page {page_num+1}")
+
+                # Process each chunk
+                for i, chunk_text in enumerate(text_chunks):
+                    # Create unique ID for this chunk
+                    chunk_id = f"{page_hash}_{i}"
+
+                    # Generate embedding
+                    embedding = get_embeddings([chunk_text])[0]
+
+                    # Add to FAISS index and get its position
+                    current_index_size = index.ntotal
+                    faiss_id = (
+                        current_index_size  # This will be the ID in FAISS (0-indexed)
+                    )
+                    index.add(np.array([embedding], dtype=np.float32))
+
+                    # Prepare DB entry with additional metadata
+                    chunk_data = {
+                        "file_path": str(pdf_path),
+                        "file_name": pdf_path.name,
+                        "page_num": page_num + 1,  # 1-indexed for humans
+                        "page_hash": page_hash,
+                        "chunk_id": chunk_id,
+                        "chunk_index": i,
+                        "total_chunks": len(text_chunks),
+                        "image_path": page_data["image_path"],
+                        "text": chunk_text,
+                        "chunk_type": chunk_type,
+                        "confidence": confidence,
+                        "doc_date": dates[0] if dates else None,
+                        "doc_id": doc_ids[0] if doc_ids else None,
+                        "project_name": project_name,
+                        "parties_involved": parties_involved,
+                        "faiss_id": faiss_id,  # Store FAISS ID directly
+                    }
+
+                    # Save to database
+                    save_page_chunk(chunk_data)
+
+                progress.update(
+                    task_id, advance=1, status=f"Processed {chunk_type} ({confidence}%)"
+                )
+
+            except Exception as e:
+                console.log(f"[bold red]Error processing page {page_num+1}: {str(e)}")
+                progress.update(task_id, advance=1, status=f"Error: {str(e)}")
+
+        # All pages processed successfully, save index
+        save_faiss_index(index)
+
+    except Exception as e:
+        console.log(f"[bold red]Error during PDF processing: {str(e)}")
+        progress.update(task_id, status=f"Failed: {str(e)}")
+        # Index will not be saved, keeping the previous state
 
     # Close document
     doc.close()
 
-    # Save updated index
-    save_faiss_index(index)
 
-
-def ingest_pdfs(pdf_paths: List[Path]) -> None:
+def ingest_pdfs(pdf_paths: List[Path], project_name: Optional[str] = None) -> None:
     """Ingest a list of PDF files."""
     # Ensure directories exist
     ensure_dirs()
@@ -470,6 +537,6 @@ def ingest_pdfs(pdf_paths: List[Path]) -> None:
 
         # Process each PDF
         for pdf_path, task_id in pdf_tasks.items():
-            process_pdf(pdf_path, progress, task_id)
+            process_pdf(pdf_path, progress, task_id, project_name)
 
     console.log("[bold green]Ingestion complete!")
