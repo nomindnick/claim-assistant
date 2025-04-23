@@ -34,6 +34,15 @@ python -m claimctl.cli ingest /path/to/file1.pdf /path/to/file2.pdf
 
 # Ingest all PDFs in a directory
 python -m claimctl.cli ingest /path/to/directory/*.pdf
+
+# Process a directory of PDFs (including subdirectories)
+python -m claimctl.cli ingest /path/to/directory --recursive
+
+# Process in batches with progress tracking
+python -m claimctl.cli ingest /path/to/directory --batch-size 10
+
+# Resume processing from a previous interrupted run
+python -m claimctl.cli ingest /path/to/directory --resume
 ```
 
 During ingestion, the system:
@@ -61,6 +70,11 @@ The system will:
 
 After seeing the results, you can interact with the documents:
 
+- Type `f` to ask a follow-up question with context from previous questions
+- Type `c` to compare two documents from your results
+- Type `m` to find more documents similar to a specific result
+- Type `s` to sort/filter your results by different criteria
+- Type `v` to view an image of the document page
 - Type `o` to open the most relevant PDF
 - Type `o 2` to open the second most relevant PDF
 - Type `e` to export the most relevant page as an image to the exhibits folder
@@ -84,6 +98,17 @@ python -m claimctl.cli ask "What caused the delay?" --md
 
 ## Advanced Usage
 
+### Document Visualization and Result Management
+
+The system provides several enhancements for working with results:
+
+* **Document Thumbnails**: Thumbnails are automatically generated during ingestion and can be viewed with the `v` command
+* **Text Highlighting**: Search terms are automatically highlighted in the results
+* **Result Sorting**: Type `s` to sort results by relevance, date, or document type
+* **Result Filtering**: Filter results to show only specific document types
+* **Document Comparison**: Type `c` to compare two documents and analyze their similarities and differences
+* **Follow-up Questions**: Type `f` to ask follow-up questions while maintaining conversation context
+
 ### Configuration Options
 
 You can edit `~/.claimctl.ini` to change:
@@ -91,6 +116,7 @@ You can edit `~/.claimctl.ini` to change:
 - OpenAI model selection
 - Retrieval parameters (number of results, relevance threshold)
 - Chunking parameters
+- Context window size for document text
 
 ### Environment Variables
 
@@ -122,6 +148,26 @@ If you encounter issues:
      brew install tesseract  # macOS
      ```
 
+### Clearing Data and Starting Fresh
+
+You can clear previously ingested data and start fresh using the `clear` command:
+
+```bash
+# Clear everything (database, embeddings, images, cache files, etc.)
+python -m claimctl.cli clear --all
+
+# Clear only specific components
+python -m claimctl.cli clear --database --embeddings
+
+# Clear different types of files
+python -m claimctl.cli clear --images      # Clear full-size images and thumbnails
+python -m claimctl.cli clear --cache       # Clear temporary cache files
+python -m claimctl.cli clear --exhibits    # Clear exported exhibits
+python -m claimctl.cli clear --resume-log  # Clear the ingestion resume log
+```
+
+The clear command will ask for confirmation before deleting any data and will provide a report of what was cleared.
+
 ## Example Workflow
 
 ```bash
@@ -129,15 +175,24 @@ If you encounter issues:
 cd ~/Projects/claim-assistant
 source venv/bin/activate
 
+# Clear previous data (optional)
+python -m claimctl.cli clear --all
+
 # Ingest documents
 python -m claimctl.cli ingest ~/test-pdfs/*.pdf
 
 # Ask a question
 python -m claimctl.cli ask "Where is Change Order 12 justified?"
 
-# Export a page to the exhibits folder (after seeing results)
+# Sort/filter results
+# Type 's' at the prompt
+
+# Ask a follow-up question
+# Type 'f' at the prompt
+
+# Export a page to the exhibits folder
 # Type 'e' at the prompt
 
-# Open the PDF (after seeing results)
+# Open the PDF
 # Type 'o' at the prompt
 ```
