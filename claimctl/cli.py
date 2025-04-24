@@ -39,7 +39,9 @@ def ingest_command(
         5, "--batch-size", "-b", help="Number of PDFs to process in each batch"
     ),
     resume: bool = typer.Option(
-        True, "--resume/--no-resume", help="Resume processing from previous run if it was interrupted"
+        True,
+        "--resume/--no-resume",
+        help="Resume processing from previous run if it was interrupted",
     ),
     recursive: bool = typer.Option(
         False, "--recursive", "-r", help="Recursively process directories"
@@ -48,7 +50,7 @@ def ingest_command(
     """Ingest PDF files into the claim assistant database."""
     # Expand directories to individual PDF files if needed
     expanded_paths = []
-    
+
     for path in pdf_paths:
         if path.is_dir():
             # Find all PDFs in the directory
@@ -66,33 +68,33 @@ def ingest_command(
                 console.print(f"[bold red]Error: {path} is not a PDF file")
                 raise typer.Exit(1)
             expanded_paths.append(path)
-    
+
     # Sort paths for consistent processing order
     expanded_paths.sort()
-    
+
     # Check if we found any PDFs
     if not expanded_paths:
         console.print("[bold red]Error: No PDF files found")
         raise typer.Exit(1)
-        
+
     console.print(f"[bold green]Found {len(expanded_paths)} PDF files to process")
-    
+
     # Confirm if large number of PDFs
     if len(expanded_paths) > 10:
         confirm = typer.confirm(
-            f"Are you sure you want to process {len(expanded_paths)} PDF files?", 
-            default=True
+            f"Are you sure you want to process {len(expanded_paths)} PDF files?",
+            default=True,
         )
         if not confirm:
             console.print("[bold yellow]Ingestion cancelled")
             raise typer.Exit(0)
-    
+
     try:
         ingest_pdfs(
-            expanded_paths, 
-            project_name=project, 
-            batch_size=batch_size, 
-            resume_on_error=resume
+            expanded_paths,
+            project_name=project,
+            batch_size=batch_size,
+            resume_on_error=resume,
         )
     except Exception as e:
         console.print(f"[bold red]Error: {str(e)}")
@@ -183,34 +185,46 @@ def clear_command(
     exhibits: bool = typer.Option(
         False, "--exhibits", "-x", help="Clear exported exhibits"
     ),
+    exports: bool = typer.Option(
+        False, "--exports", "-p", help="Clear exported response PDFs"
+    ),
     resume_log: bool = typer.Option(
         False, "--resume-log", "-r", help="Clear resume log file"
     ),
     all: bool = typer.Option(
-        False, "--all", "-a", help="Clear everything (database, embeddings, images, cache, exhibits, resume log)"
+        False,
+        "--all",
+        "-a",
+        help="Clear everything (database, embeddings, images, cache, exhibits, exports, resume log)",
     ),
 ) -> None:
     """Clear data from previous runs to start fresh."""
     config = get_config()
-    
+
     # If no specific option is selected, show help
-    if not (database or embeddings or images or cache or exhibits or resume_log or all):
-        console.print("[bold yellow]No clear options selected. Please specify what to clear.")
-        console.print("Options: --database, --embeddings, --images, --cache, --exhibits, --resume-log, or --all")
+    if not (database or embeddings or images or cache or exhibits or exports or resume_log or all):
+        console.print(
+            "[bold yellow]No clear options selected. Please specify what to clear."
+        )
+        console.print(
+            "Options: --database, --embeddings, --images, --cache, --exhibits, --exports, --resume-log, or --all"
+        )
         return
-    
+
     # If --all is specified, set all options to True
     if all:
-        database = embeddings = images = cache = exhibits = resume_log = True
-    
+        database = embeddings = images = cache = exhibits = exports = resume_log = True
+
     # Ask for confirmation
-    should_clear = typer.confirm("Are you sure you want to clear selected data? This cannot be undone.")
+    should_clear = typer.confirm(
+        "Are you sure you want to clear selected data? This cannot be undone."
+    )
     if not should_clear:
         console.print("[bold yellow]Operation cancelled.")
         return
-    
+
     deleted_count = 0
-    
+
     # Clear database
     if database:
         try:
@@ -223,7 +237,7 @@ def clear_command(
                 console.print(f"[bold yellow]Database not found: {db_path}")
         except Exception as e:
             console.print(f"[bold red]Error clearing database: {str(e)}")
-    
+
     # Clear embeddings
     if embeddings:
         try:
@@ -236,7 +250,7 @@ def clear_command(
                 console.print(f"[bold yellow]Embeddings index not found: {index_path}")
         except Exception as e:
             console.print(f"[bold red]Error clearing embeddings: {str(e)}")
-    
+
     # Clear images and thumbnails
     if images:
         try:
@@ -247,9 +261,11 @@ def clear_command(
                 for img_file in pages_dir.glob("*.png"):
                     img_file.unlink()
                     image_count += 1
-                console.print(f"[bold green]Cleared {image_count} images from {pages_dir}")
+                console.print(
+                    f"[bold green]Cleared {image_count} images from {pages_dir}"
+                )
                 deleted_count += image_count
-            
+
             # Clear thumbnails
             thumbs_dir = Path(config.paths.DATA_DIR) / "thumbnails"
             if thumbs_dir.exists():
@@ -257,11 +273,13 @@ def clear_command(
                 for thumb_file in thumbs_dir.glob("*.png"):
                     thumb_file.unlink()
                     thumb_count += 1
-                console.print(f"[bold green]Cleared {thumb_count} thumbnails from {thumbs_dir}")
+                console.print(
+                    f"[bold green]Cleared {thumb_count} thumbnails from {thumbs_dir}"
+                )
                 deleted_count += thumb_count
         except Exception as e:
             console.print(f"[bold red]Error clearing images: {str(e)}")
-    
+
     # Clear cache files
     if cache:
         try:
@@ -277,7 +295,7 @@ def clear_command(
                 console.print(f"[bold yellow]Cache directory not found: {cache_dir}")
         except Exception as e:
             console.print(f"[bold red]Error clearing cache: {str(e)}")
-    
+
     # Clear exhibits
     if exhibits:
         try:
@@ -290,10 +308,30 @@ def clear_command(
                 console.print(f"[bold green]Cleared {exhibits_count} exported exhibits")
                 deleted_count += exhibits_count
             else:
-                console.print(f"[bold yellow]Exhibits directory not found: {exhibits_dir}")
+                console.print(
+                    f"[bold yellow]Exhibits directory not found: {exhibits_dir}"
+                )
         except Exception as e:
             console.print(f"[bold red]Error clearing exhibits: {str(e)}")
-    
+            
+    # Clear exports
+    if exports:
+        try:
+            exports_dir = Path("./Ask_Exports")
+            if exports_dir.exists():
+                exports_count = 0
+                for export_file in exports_dir.glob("*.pdf"):
+                    export_file.unlink()
+                    exports_count += 1
+                console.print(f"[bold green]Cleared {exports_count} exported response PDFs")
+                deleted_count += exports_count
+            else:
+                console.print(
+                    f"[bold yellow]Exports directory not found: {exports_dir}"
+                )
+        except Exception as e:
+            console.print(f"[bold red]Error clearing exports: {str(e)}")
+
     # Clear resume log
     if resume_log:
         try:
@@ -306,7 +344,7 @@ def clear_command(
                 console.print(f"[bold yellow]Resume log not found: {resume_log_path}")
         except Exception as e:
             console.print(f"[bold red]Error clearing resume log: {str(e)}")
-    
+
     # Final summary
     if deleted_count > 0:
         console.print(f"[bold green]Successfully cleared {deleted_count} items")

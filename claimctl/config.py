@@ -209,6 +209,9 @@ def ensure_dirs() -> None:
 
     # Create index directory
     Path(config.paths.INDEX_DIR).mkdir(exist_ok=True, parents=True)
+    
+    # Create ask exports directory
+    Path("./Ask_Exports").mkdir(exist_ok=True, parents=True)
 
 
 def show_config() -> Dict[str, Any]:

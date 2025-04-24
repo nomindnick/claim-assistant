@@ -2,6 +2,8 @@
 
 import hashlib
 import os
+import re
+import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -306,3 +308,163 @@ def create_progress(description: str) -> Progress:
     )
     # Add description to show in the progress bar
     return progress
+
+
+def export_response_as_pdf(
+    question: str,
+    answer: str,
+    chunks: List[Dict[str, Any]],
+    scores: List[float],
+) -> str:
+    """Export the LLM response and document images as a PDF.
+    
+    Args:
+        question: The user's question
+        answer: The LLM's answer
+        chunks: Document chunks used to generate the answer
+        scores: Relevance scores for each chunk
+        
+    Returns:
+        The path to the exported PDF file
+    """
+    try:
+        import datetime
+        from reportlab.lib.pagesizes import letter
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import inch
+        from reportlab.platypus import (
+            SimpleDocTemplate, 
+            Paragraph, 
+            Spacer, 
+            Table, 
+            TableStyle, 
+            Image
+        )
+        from reportlab.lib import colors
+        
+        # Create a timestamped filename
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"Ask_Exports/response_{timestamp}.pdf"
+        
+        # Create the PDF document
+        doc = SimpleDocTemplate(
+            filename,
+            pagesize=letter,
+            rightMargin=0.5*inch,
+            leftMargin=0.5*inch,
+            topMargin=0.5*inch,
+            bottomMargin=0.5*inch
+        )
+        
+        # Create styles
+        styles = getSampleStyleSheet()
+        title_style = styles["Title"]
+        heading_style = styles["Heading1"]
+        normal_style = styles["Normal"]
+        
+        # Create content elements list
+        elements = []
+        
+        # Add title
+        elements.append(Paragraph("Claim Assistant Query Response", title_style))
+        elements.append(Spacer(1, 0.25*inch))
+        
+        # Add timestamp
+        date_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        elements.append(Paragraph(f"Generated on: {date_str}", normal_style))
+        elements.append(Spacer(1, 0.25*inch))
+        
+        # Add question
+        elements.append(Paragraph("Question:", heading_style))
+        elements.append(Paragraph(question, normal_style))
+        elements.append(Spacer(1, 0.25*inch))
+        
+        # Add answer with proper formatting for markdown content
+        elements.append(Paragraph("Answer:", heading_style))
+        
+        # Convert markdown to HTML-like formatting that ReportLab can handle
+        formatted_answer = answer
+        # Handle bold text
+        formatted_answer = formatted_answer.replace("**", "<b>", 1)
+        while "**" in formatted_answer:
+            formatted_answer = formatted_answer.replace("**", "</b>", 1)
+            if "**" in formatted_answer:
+                formatted_answer = formatted_answer.replace("**", "<b>", 1)
+        
+        # Handle citations [Doc X, p.Y]
+        import re
+        citation_pattern = r'\[Doc \d+, p\.\d+\]'
+        formatted_answer = re.sub(
+            citation_pattern,
+            lambda m: f'<b>{m.group(0)}</b>',
+            formatted_answer
+        )
+        
+        # Handle paragraphs
+        paragraphs = formatted_answer.split('\n\n')
+        for para in paragraphs:
+            if para.strip():
+                elements.append(Paragraph(para, normal_style))
+                elements.append(Spacer(1, 0.1*inch))
+        
+        # Add sources section
+        elements.append(Spacer(1, 0.15*inch))
+        elements.append(Paragraph("Referenced Documents:", heading_style))
+        
+        # Create a table for documents
+        data = [["#", "File", "Page", "Type", "Date", "Relevance"]]
+        
+        # Add each source to the table
+        for i, (chunk, score) in enumerate(zip(chunks, scores)):
+            data.append([
+                str(i + 1),
+                chunk["file_name"],
+                str(chunk["page_num"]),
+                chunk.get("chunk_type", ""),
+                str(chunk.get("doc_date", "")),
+                f"{score:.2f}"
+            ])
+        
+        # Create and style the table
+        table = Table(data, repeatRows=1)
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.lightblue),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ]))
+        
+        elements.append(table)
+        elements.append(Spacer(1, 0.25*inch))
+        
+        # Add document images
+        elements.append(Paragraph("Document Images:", heading_style))
+        
+        # For each chunk that has an image, add it to the PDF
+        for i, chunk in enumerate(chunks):
+            if chunk.get("image_path") and os.path.exists(chunk["image_path"]):
+                elements.append(Paragraph(
+                    f"Source {i+1}: {chunk['file_name']} (Page {chunk['page_num']})",
+                    styles["Heading2"]
+                ))
+                
+                # Add image with appropriate scaling
+                img = Image(chunk["image_path"], width=6*inch, height=8*inch, kind='proportional')
+                elements.append(img)
+                elements.append(Spacer(1, 0.25*inch))
+        
+        # Build the PDF
+        doc.build(elements)
+        
+        return filename
+    
+    except ImportError as e:
+        console.print(f"[bold red]Error: Required PDF export libraries are missing. {str(e)}")
+        console.print("[bold yellow]Try installing with: pip install reportlab")
+        return ""
+    except Exception as e:
+        console.print(f"[bold red]Error exporting response as PDF: {str(e)}")
+        return ""

@@ -79,6 +79,7 @@ After seeing the results, you can interact with the documents:
 - Type `o 2` to open the second most relevant PDF
 - Type `e` to export the most relevant page as an image to the exhibits folder
 - Type `e 3` to export the third most relevant page
+- Type `p` to export the full response as a PDF with all referenced documents
 - Type `q` to quit
 
 ### Output Formats
@@ -108,6 +109,7 @@ The system provides several enhancements for working with results:
 * **Result Filtering**: Filter results to show only specific document types
 * **Document Comparison**: Type `c` to compare two documents and analyze their similarities and differences
 * **Follow-up Questions**: Type `f` to ask follow-up questions while maintaining conversation context
+* **PDF Export**: Type `p` to export the full response with all referenced documents as a PDF file for later reference
 
 ### Configuration Options
 
@@ -164,6 +166,7 @@ python -m claimctl.cli clear --database --embeddings
 python -m claimctl.cli clear --images      # Clear full-size images and thumbnails
 python -m claimctl.cli clear --cache       # Clear temporary cache files
 python -m claimctl.cli clear --exhibits    # Clear exported exhibits
+python -m claimctl.cli clear --exports     # Clear exported response PDFs
 python -m claimctl.cli clear --resume-log  # Clear the ingestion resume log
 ```
 
