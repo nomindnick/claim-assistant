@@ -59,10 +59,15 @@ Once your documents are ingested, you can ask natural language questions:
 
 ```bash
 python -m claimctl.cli ask "Where is Change Order 12 justified?"
+
+# Specify the number of documents to use (default is 6)
+python -m claimctl.cli ask "Where is Change Order 12 justified?" --top-k 10
+# or using the shorter flag
+python -m claimctl.cli ask "Where is Change Order 12 justified?" -k 10
 ```
 
 The system will:
-1. Find relevant documents based on semantic similarity
+1. Find relevant documents based on semantic similarity (by default, the top 6 documents)
 2. Generate a comprehensive answer using GPT-4o-mini
 3. Display source documents with their relevance scores
 
@@ -99,6 +104,27 @@ python -m claimctl.cli ask "What caused the delay?" --md
 
 ## Advanced Usage
 
+### Filtering and Refining Queries
+
+You can refine your searches with various filters:
+
+```bash
+# Filter by document type
+python -m claimctl.cli ask "What are the material costs?" --type Invoice
+
+# Filter by project name
+python -m claimctl.cli ask "What caused the delay?" --project "Highway Bridge Project"
+
+# Filter by date range
+python -m claimctl.cli ask "What were the issues?" --from "2024-01-01" --to "2024-04-01"
+
+# Filter by parties involved
+python -m claimctl.cli ask "What were the contract terms?" --parties "ABC Construction"
+
+# Change search type (default is hybrid)
+python -m claimctl.cli ask "What is the total cost?" --search vector  # Options: hybrid, vector, keyword
+```
+
 ### Document Visualization and Result Management
 
 The system provides several enhancements for working with results:
@@ -116,7 +142,11 @@ The system provides several enhancements for working with results:
 You can edit `~/.claimctl.ini` to change:
 - Data storage locations (DATA_DIR, INDEX_DIR)
 - OpenAI model selection (MODEL, EMBED_MODEL)
-- Retrieval parameters (TOP_K, SCORE_THRESHOLD, CONTEXT_SIZE, ANSWER_CONFIDENCE)
+- Retrieval parameters:
+  - TOP_K: Number of documents to retrieve (default is 6)
+  - SCORE_THRESHOLD: Minimum similarity score for documents
+  - CONTEXT_SIZE: Character limit per chunk for context window
+  - ANSWER_CONFIDENCE: Whether to include confidence indicators
 - Chunking parameters (CHUNK_SIZE, CHUNK_OVERLAP)
 - BM25 search parameters (K1, B, WEIGHT)
 - Project settings (DEFAULT_PROJECT)
@@ -185,8 +215,14 @@ python -m claimctl.cli clear --all
 # Ingest documents
 python -m claimctl.cli ingest ~/test-pdfs/*.pdf
 
-# Ask a question
+# Ask a question with default settings (retrieves top 6 documents)
 python -m claimctl.cli ask "Where is Change Order 12 justified?"
+
+# Ask a question with more documents for complex queries
+python -m claimctl.cli ask "Compare all the change orders related to site conditions" --top-k 10
+
+# Filter results by document type and date range
+python -m claimctl.cli ask "What were the approved costs?" --type "ChangeOrder" --from "2024-01-01"
 
 # Sort/filter results
 # Type 's' at the prompt
@@ -199,4 +235,7 @@ python -m claimctl.cli ask "Where is Change Order 12 justified?"
 
 # Open the PDF
 # Type 'o' at the prompt
+
+# Export response as PDF with all referenced documents
+# Type 'p' at the prompt
 ```
