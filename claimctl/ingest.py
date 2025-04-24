@@ -405,7 +405,7 @@ def process_pdf(
         doc = fitz.open(pdf_path)
     except Exception as e:
         console.log(f"[bold red]Error opening {pdf_path}: {str(e)}")
-        progress.update(task_id, advance=1, status=f"Error: {str(e)}")
+        progress.update(task_id, advance=1, description=f"Error: {str(e)}")
         return
 
     # Get/create FAISS index
@@ -413,13 +413,13 @@ def process_pdf(
 
     # Process each page
     total_pages = len(doc)
-    progress.update(task_id, total=total_pages, status="Starting")
+    progress.update(task_id, total=total_pages, description="Starting")
 
     # Begin transaction - we'll save the index at the end only if all pages process successfully
     try:
         for page_num in range(total_pages):
             progress.update(
-                task_id, advance=0, status=f"Page {page_num+1}/{total_pages}"
+                task_id, advance=0, description=f"Page {page_num+1}/{total_pages}"
             )
 
             # Generate unique hash for this page
@@ -428,7 +428,7 @@ def process_pdf(
             # Skip if already processed
             if is_page_processed(page_hash):
                 console.log(f"Skipping page {page_num+1} (already processed)")
-                progress.update(task_id, advance=1, status=f"Skipped (duplicate)")
+                progress.update(task_id, advance=1, description=f"Skipped (duplicate)")
                 continue
 
             # Process page
@@ -462,13 +462,13 @@ def process_pdf(
 
                 # Prepare all chunks for batched embedding generation
                 chunk_data_list = []
-                for i, chunk_text in enumerate(text_chunks):
+                for i, text_chunk in enumerate(text_chunks):
                     # Create unique ID for this chunk
                     chunk_id = f"{page_hash}_{i}"
 
                     # Prepare DB entry with additional metadata
                     chunk_data = {
-                        "text": chunk_text,
+                        "text": text_chunk,
                         "chunk_id": chunk_id,
                         "chunk_index": i,
                     }
@@ -515,19 +515,19 @@ def process_pdf(
                     save_page_chunk(chunk_data)
 
                 progress.update(
-                    task_id, advance=1, status=f"Processed {chunk_type} ({confidence}%)"
+                    task_id, advance=1, description=f"Processed {chunk_type} ({confidence}%)"
                 )
 
             except Exception as e:
                 console.log(f"[bold red]Error processing page {page_num+1}: {str(e)}")
-                progress.update(task_id, advance=1, status=f"Error: {str(e)}")
+                progress.update(task_id, advance=1, description=f"Error: {str(e)}")
 
         # All pages processed successfully, save index
         save_faiss_index(index)
 
     except Exception as e:
         console.log(f"[bold red]Error during PDF processing: {str(e)}")
-        progress.update(task_id, status=f"Failed: {str(e)}")
+        progress.update(task_id, description=f"Failed: {str(e)}")
         # Index will not be saved, keeping the previous state
 
     # Close document
@@ -597,7 +597,7 @@ def batch_generate_embeddings(
             progress.update(
                 task_id,
                 advance=0,
-                status=f"Embedding batch {i//batch_size + 1}/{math.ceil(total_chunks/batch_size)}",
+                description=f"Embedding batch {i//batch_size + 1}/{math.ceil(total_chunks/batch_size)}",
             )
 
             try:
@@ -606,13 +606,13 @@ def batch_generate_embeddings(
                 embeddings_list.append(batch_embeddings)
                 # Update progress
                 progress.update(
-                    task_id, advance=1, status=f"Completed batch {i//batch_size + 1}"
+                    task_id, advance=1, description=f"Completed batch {i//batch_size + 1}"
                 )
             except Exception as e:
                 console.log(f"[bold red]Error in batch {i//batch_size + 1}: {str(e)}")
                 # Still advance progress
                 progress.update(
-                    task_id, advance=1, status=f"Error in batch {i//batch_size + 1}"
+                    task_id, advance=1, description=f"Error in batch {i//batch_size + 1}"
                 )
                 # Create fallback random embeddings for this batch
                 fallback_embeddings = np.zeros(
@@ -686,7 +686,7 @@ def ingest_pdfs(
     # Create a single progress context for the entire process
     with create_progress(f"Processing {total_pdfs} PDFs in batches") as progress:
         overall_task = progress.add_task(
-            "Overall progress", total=total_pdfs, status="Starting"
+            "Overall progress", total=total_pdfs
         )
 
         # Process in batches
@@ -695,14 +695,14 @@ def ingest_pdfs(
             progress.update(
                 overall_task,
                 advance=0,
-                status=f"Batch {batch_idx//batch_size + 1}/{math.ceil(total_pdfs/batch_size)}",
+                description=f"Batch {batch_idx//batch_size + 1}/{math.ceil(total_pdfs/batch_size)}",
             )
 
             # Create a task for each PDF in this batch
             pdf_tasks = {}
             for pdf_path in batch:
                 task_id = progress.add_task(
-                    f"Processing {pdf_path.name}", total=1, status="Waiting"
+                    f"Processing {pdf_path.name}", total=1
                 )
                 pdf_tasks[pdf_path] = task_id
 
@@ -730,7 +730,7 @@ def ingest_pdfs(
             progress.update(
                 overall_task,
                 advance=len(batch),
-                status=f"Completed {processed_count}/{total_pdfs} ({error_count} errors)",
+                description=f"Completed {processed_count}/{total_pdfs} ({error_count} errors)",
             )
 
     # Final status

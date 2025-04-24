@@ -3,7 +3,7 @@
 import hashlib
 import os
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import fitz  # PyMuPDF
 import pytesseract
@@ -81,14 +81,13 @@ def save_page_image(doc: fitz.Document, page_num: int) -> Dict[str, str]:
     full_pix.save(str(img_path))
 
     # Create a thumbnail version
-    thumb_pix = page.get_pixmap(matrix=fitz.Matrix(72 / 72, 72 / 72))  # 72 dpi (screen resolution)
+    thumb_pix = page.get_pixmap(
+        matrix=fitz.Matrix(72 / 72, 72 / 72)
+    )  # 72 dpi (screen resolution)
     thumb_path = thumbs_dir / f"{pdf_name}_{page_num+1:04d}_thumb.png"
     thumb_pix.save(str(thumb_path))
 
-    return {
-        "image_path": str(img_path),
-        "thumbnail_path": str(thumb_path)
-    }
+    return {"image_path": str(img_path), "thumbnail_path": str(thumb_path)}
 
 
 def preprocess_image_for_ocr(image_path: str) -> str:
@@ -235,36 +234,52 @@ def process_page(doc: fitz.Document, page_num: int) -> Dict[str, Any]:
 
 def highlight_text(text: str, query: str) -> str:
     """Highlight query terms in text with formatting for display.
-    
+
     Args:
         text: The original text
         query: The search query
-        
+
     Returns:
         Text with query terms wrapped in rich formatting
     """
     if not query or not text:
         return text
-        
+
     # Break the query into individual terms, ignoring common words
-    stop_words = {"a", "an", "the", "and", "or", "but", "in", "on", "of", "is", "are", "was", "were", "to", "for"}
+    stop_words = {
+        "a",
+        "an",
+        "the",
+        "and",
+        "or",
+        "but",
+        "in",
+        "on",
+        "of",
+        "is",
+        "are",
+        "was",
+        "were",
+        "to",
+        "for",
+    }
     query_terms = set()
-    
+
     # Add phrases (multi-word terms in quotes)
     phrase_matches = re.findall(r'"([^"]+)"', query)
     for phrase in phrase_matches:
         query_terms.add(phrase.lower())
         # Remove phrases from the query for individual word processing
-        query = query.replace(f'"{phrase}"', '')
-    
+        query = query.replace(f'"{phrase}"', "")
+
     # Add individual significant words
-    for word in re.findall(r'\b\w{3,}\b', query.lower()):
+    for word in re.findall(r"\b\w{3,}\b", query.lower()):
         if word not in stop_words:
             query_terms.add(word)
-    
+
     # Sort terms by length (longest first) to avoid partial matches
     sorted_terms = sorted(query_terms, key=len, reverse=True)
-    
+
     # Highlight each term with rich formatting
     highlighted_text = text
     for term in sorted_terms:
@@ -272,19 +287,22 @@ def highlight_text(text: str, query: str) -> str:
         if len(term.split()) > 1:  # Multi-word phrase
             pattern = re.compile(re.escape(term), re.IGNORECASE)
         else:  # Single word - match whole words only
-            pattern = re.compile(r'\b' + re.escape(term) + r'\b', re.IGNORECASE)
-            
+            pattern = re.compile(r"\b" + re.escape(term) + r"\b", re.IGNORECASE)
+
         # Replace with highlighted version
-        highlighted_text = pattern.sub(lambda m: f"[bold yellow]{m.group(0)}[/bold yellow]", highlighted_text)
-    
+        highlighted_text = pattern.sub(
+            lambda m: f"[bold yellow]{m.group(0)}[/bold yellow]", highlighted_text
+        )
+
     return highlighted_text
 
 
 def create_progress(description: str) -> Progress:
     """Create a rich progress bar."""
-    return Progress(
+    progress = Progress(
         TextColumn("[bold blue]{task.description}"),
         BarColumn(),
         TextColumn("[bold]{task.completed}/{task.total}"),
-        TextColumn("[italic]{task.fields[status]}"),
     )
+    # Add description to show in the progress bar
+    return progress
