@@ -2,6 +2,7 @@
 
 import os
 import re
+import math
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -464,7 +465,7 @@ def process_pdf(
                 for i, chunk_text in enumerate(text_chunks):
                     # Create unique ID for this chunk
                     chunk_id = f"{page_hash}_{i}"
-                    
+
                     # Prepare DB entry with additional metadata
                     chunk_data = {
                         "text": chunk_text,
@@ -472,35 +473,43 @@ def process_pdf(
                         "chunk_index": i,
                     }
                     chunk_data_list.append(chunk_data)
-                
-                # Generate embeddings in batches
-                embeddings = batch_generate_embeddings(chunk_data_list, batch_size=10)
-                
+
+                # Generate embeddings in batches, passing the current progress bar
+                embeddings = batch_generate_embeddings(
+                    chunk_data_list, batch_size=10, progress=progress
+                )
+
                 # Process each chunk with its embedding
-                for i, (chunk_data, embedding) in enumerate(zip(chunk_data_list, embeddings)):
+                for i, (chunk_data, embedding) in enumerate(
+                    zip(chunk_data_list, embeddings)
+                ):
                     # Add to FAISS index and get its position
                     current_index_size = index.ntotal
-                    faiss_id = current_index_size  # This will be the ID in FAISS (0-indexed)
+                    faiss_id = (
+                        current_index_size  # This will be the ID in FAISS (0-indexed)
+                    )
                     index.add(np.array([embedding], dtype=np.float32))
-                    
+
                     # Complete the chunk data with all metadata
-                    chunk_data.update({
-                        "file_path": str(pdf_path),
-                        "file_name": pdf_path.name,
-                        "page_num": page_num + 1,  # 1-indexed for humans
-                        "page_hash": page_hash,
-                        "chunk_index": i,
-                        "total_chunks": len(text_chunks),
-                        "image_path": page_data["image_path"],
-                        "text": chunk_text,
-                        "chunk_type": chunk_type,
-                        "confidence": confidence,
-                        "doc_date": dates[0] if dates else None,
-                        "doc_id": doc_ids[0] if doc_ids else None,
-                        "project_name": project_name,
-                        "parties_involved": parties_involved,
-                        "faiss_id": faiss_id,  # Store FAISS ID directly
-                    }
+                    chunk_data.update(
+                        {
+                            "file_path": str(pdf_path),
+                            "file_name": pdf_path.name,
+                            "page_num": page_num + 1,  # 1-indexed for humans
+                            "page_hash": page_hash,
+                            "chunk_index": i,
+                            "total_chunks": len(text_chunks),
+                            "image_path": page_data["image_path"],
+                            "text": chunk_text,
+                            "chunk_type": chunk_type,
+                            "confidence": confidence,
+                            "doc_date": dates[0] if dates else None,
+                            "doc_id": doc_ids[0] if doc_ids else None,
+                            "project_name": project_name,
+                            "parties_involved": parties_involved,
+                            "faiss_id": faiss_id,  # Store FAISS ID directly
+                        }
+                    )
 
                     # Save to database
                     save_page_chunk(chunk_data)
@@ -525,68 +534,113 @@ def process_pdf(
     doc.close()
 
 
-def batch_generate_embeddings(chunks: List[Dict[str, str]], batch_size: int = 10) -> np.ndarray:
+def batch_generate_embeddings(
+    chunks: List[Dict[str, Any]],
+    batch_size: int = 10,
+    progress: Optional[Progress] = None,
+) -> np.ndarray:
     """Generate embeddings in batches to avoid API rate limits.
-    
+
     Args:
         chunks: List of text chunks to embed
         batch_size: Number of embeddings to generate in each batch
-        
+        progress: Optional existing progress bar to use
+
     Returns:
         Array of embeddings for all chunks
     """
     texts = [chunk["text"] for chunk in chunks]
     total_chunks = len(texts)
     embeddings_list = []
-    
-    # Create progress bar for batched embedding generation
-    with create_progress("Generating embeddings") as progress:
-        task_id = progress.add_task(
-            "Processing batches", total=math.ceil(total_chunks / batch_size)
+
+    # Process embeddings without progress bar if none provided
+    if progress is None:
+        console.log(
+            f"Generating embeddings for {total_chunks} chunks in batches of {batch_size}"
         )
-        
+
         # Process in batches
         for i in range(0, total_chunks, batch_size):
-            batch_texts = texts[i:i+batch_size]
-            progress.update(task_id, advance=0, status=f"Batch {i//batch_size + 1}/{math.ceil(total_chunks/batch_size)}")
-            
+            batch_texts = texts[i : i + batch_size]
             try:
                 # Get embeddings for this batch
                 batch_embeddings = get_embeddings(batch_texts)
                 embeddings_list.append(batch_embeddings)
-                
-                # Update progress
-                progress.update(task_id, advance=1, status=f"Completed batch {i//batch_size + 1}")
-                
+                console.log(
+                    f"Completed embedding batch {i//batch_size + 1}/{math.ceil(total_chunks/batch_size)}"
+                )
             except Exception as e:
                 console.log(f"[bold red]Error in batch {i//batch_size + 1}: {str(e)}")
-                # Still advance progress
-                progress.update(task_id, advance=1, status=f"Error in batch {i//batch_size + 1}")
-                
                 # Create fallback random embeddings for this batch
-                fallback_embeddings = np.zeros((len(batch_texts), 1536), dtype=np.float32)
+                fallback_embeddings = np.zeros(
+                    (len(batch_texts), 1536), dtype=np.float32
+                )
                 for j, text in enumerate(batch_texts):
                     text_hash = hash(text) % 10000
                     np.random.seed(text_hash)
                     random_embedding = np.random.randn(1536).astype(np.float32)
                     # Normalize to unit length
-                    random_embedding = random_embedding / np.linalg.norm(random_embedding)
+                    random_embedding = random_embedding / np.linalg.norm(
+                        random_embedding
+                    )
                     fallback_embeddings[j] = random_embedding
-                
                 embeddings_list.append(fallback_embeddings)
-    
+    else:
+        # Use the provided progress bar
+        task_id = progress.add_task(
+            "Generating embeddings", total=math.ceil(total_chunks / batch_size)
+        )
+
+        # Process in batches
+        for i in range(0, total_chunks, batch_size):
+            batch_texts = texts[i : i + batch_size]
+            progress.update(
+                task_id,
+                advance=0,
+                status=f"Embedding batch {i//batch_size + 1}/{math.ceil(total_chunks/batch_size)}",
+            )
+
+            try:
+                # Get embeddings for this batch
+                batch_embeddings = get_embeddings(batch_texts)
+                embeddings_list.append(batch_embeddings)
+                # Update progress
+                progress.update(
+                    task_id, advance=1, status=f"Completed batch {i//batch_size + 1}"
+                )
+            except Exception as e:
+                console.log(f"[bold red]Error in batch {i//batch_size + 1}: {str(e)}")
+                # Still advance progress
+                progress.update(
+                    task_id, advance=1, status=f"Error in batch {i//batch_size + 1}"
+                )
+                # Create fallback random embeddings for this batch
+                fallback_embeddings = np.zeros(
+                    (len(batch_texts), 1536), dtype=np.float32
+                )
+                for j, text in enumerate(batch_texts):
+                    text_hash = hash(text) % 10000
+                    np.random.seed(text_hash)
+                    random_embedding = np.random.randn(1536).astype(np.float32)
+                    # Normalize to unit length
+                    random_embedding = random_embedding / np.linalg.norm(
+                        random_embedding
+                    )
+                    fallback_embeddings[j] = random_embedding
+                embeddings_list.append(fallback_embeddings)
+
     # Combine all batches
     return np.vstack(embeddings_list) if embeddings_list else np.array([])
 
 
 def ingest_pdfs(
-    pdf_paths: List[Path], 
-    project_name: Optional[str] = None, 
+    pdf_paths: List[Path],
+    project_name: Optional[str] = None,
     batch_size: int = 5,
     resume_on_error: bool = True,
 ) -> None:
     """Ingest a list of PDF files with batch processing and resume capability.
-    
+
     Args:
         pdf_paths: List of PDF paths to process
         project_name: Optional project name to associate with documents
@@ -598,84 +652,91 @@ def ingest_pdfs(
 
     # Initialize database
     init_database()
-    
+
     # Create resume log file
     resume_log_path = Path(get_config().paths.DATA_DIR) / "ingest_resume.log"
     completed_pdfs = set()
-    
+
     # Load previously completed files if resume file exists
     if resume_log_path.exists():
         try:
             with open(resume_log_path, "r") as f:
                 completed_pdfs = set(line.strip() for line in f.readlines())
-            console.log(f"[bold yellow]Found {len(completed_pdfs)} previously processed files")
+            console.log(
+                f"[bold yellow]Found {len(completed_pdfs)} previously processed files"
+            )
         except Exception as e:
             console.log(f"[bold red]Error reading resume log: {str(e)}")
-    
+
     # Filter out already processed PDFs if resuming
     if resume_on_error and completed_pdfs:
-        filtered_paths = [p for p in pdf_paths if str(p.absolute()) not in completed_pdfs]
+        filtered_paths = [
+            p for p in pdf_paths if str(p.absolute()) not in completed_pdfs
+        ]
         skipped = len(pdf_paths) - len(filtered_paths)
         if skipped > 0:
             console.log(f"[bold yellow]Skipping {skipped} already processed files")
         pdf_paths = filtered_paths
-    
+
     # Process PDFs in batches
     total_pdfs = len(pdf_paths)
     processed_count = 0
     error_count = 0
-    
-    # Create progress context for overall process
-    with create_progress(f"Processing {total_pdfs} PDFs in batches") as overall_progress:
-        overall_task = overall_progress.add_task(
+
+    # Create a single progress context for the entire process
+    with create_progress(f"Processing {total_pdfs} PDFs in batches") as progress:
+        overall_task = progress.add_task(
             "Overall progress", total=total_pdfs, status="Starting"
         )
-        
+
         # Process in batches
         for batch_idx in range(0, total_pdfs, batch_size):
-            batch = pdf_paths[batch_idx:batch_idx + batch_size]
-            overall_progress.update(
-                overall_task, 
+            batch = pdf_paths[batch_idx : batch_idx + batch_size]
+            progress.update(
+                overall_task,
                 advance=0,
-                status=f"Batch {batch_idx//batch_size + 1}/{math.ceil(total_pdfs/batch_size)}"
+                status=f"Batch {batch_idx//batch_size + 1}/{math.ceil(total_pdfs/batch_size)}",
             )
-            
-            # Create progress context for this batch
-            with create_progress(f"Batch {batch_idx//batch_size + 1}") as batch_progress:
-                # Create a task for each PDF in this batch
-                pdf_tasks = {}
-                for pdf_path in batch:
-                    task_id = batch_progress.add_task(
-                        f"Processing {pdf_path.name}", total=1, status="Waiting"
-                    )
-                    pdf_tasks[pdf_path] = task_id
-                
-                # Process each PDF in this batch
-                for pdf_path, task_id in pdf_tasks.items():
-                    try:
-                        process_pdf(pdf_path, batch_progress, task_id, project_name)
-                        processed_count += 1
-                        
-                        # Mark as completed for resume functionality
-                        with open(resume_log_path, "a") as f:
-                            f.write(f"{pdf_path.absolute()}\n")
-                            
-                    except Exception as e:
-                        console.log(f"[bold red]Error processing {pdf_path}: {str(e)}")
-                        error_count += 1
-                        if not resume_on_error:
-                            console.log("[bold red]Aborting due to error (resume_on_error=False)")
-                            raise e
-            
+
+            # Create a task for each PDF in this batch
+            pdf_tasks = {}
+            for pdf_path in batch:
+                task_id = progress.add_task(
+                    f"Processing {pdf_path.name}", total=1, status="Waiting"
+                )
+                pdf_tasks[pdf_path] = task_id
+
+            # Process each PDF in this batch
+            for pdf_path, task_id in pdf_tasks.items():
+                try:
+                    # Pass the same progress object
+                    process_pdf(pdf_path, progress, task_id, project_name)
+                    processed_count += 1
+
+                    # Mark as completed for resume functionality
+                    with open(resume_log_path, "a") as f:
+                        f.write(f"{pdf_path.absolute()}\n")
+
+                except Exception as e:
+                    console.log(f"[bold red]Error processing {pdf_path}: {str(e)}")
+                    error_count += 1
+                    if not resume_on_error:
+                        console.log(
+                            "[bold red]Aborting due to error (resume_on_error=False)"
+                        )
+                        raise e
+
             # Update overall progress after each batch
-            overall_progress.update(
-                overall_task, 
+            progress.update(
+                overall_task,
                 advance=len(batch),
-                status=f"Completed {processed_count}/{total_pdfs} ({error_count} errors)"
+                status=f"Completed {processed_count}/{total_pdfs} ({error_count} errors)",
             )
-    
+
     # Final status
     if error_count > 0:
-        console.log(f"[bold yellow]Ingestion completed with {error_count} errors. {processed_count}/{total_pdfs} files processed successfully.")
+        console.log(
+            f"[bold yellow]Ingestion completed with {error_count} errors. {processed_count}/{total_pdfs} files processed successfully."
+        )
     else:
         console.log("[bold green]Ingestion complete! All files processed successfully.")
