@@ -145,16 +145,34 @@ def hybrid_search(
     if not top_k:
         top_k = config.retrieval.TOP_K
 
-    # Get all chunks that match metadata filters
+    # Get vector search results first
+    vector_ids = []
+    try:
+        index = create_or_load_faiss_index()
+        
+        if index.ntotal > 0:
+            # Get query embedding
+            query_embedding = get_embeddings([query])[0].reshape(1, -1)
+            
+            # Search FAISS index for top results
+            k_search = min(top_k * 10, index.ntotal)  # Get more results than needed for filtering
+            distances, indices = index.search(query_embedding, k_search)
+            
+            # Convert FAISS indices to vector_ids for database lookup
+            vector_ids = [int(idx) for idx in indices[0]]
+            console.log(f"Vector search found {len(vector_ids)} relevant vectors")
+    except Exception as e:
+        console.log(f"[bold red]Error in vector search: {str(e)}")
+    
+    # Get chunks that match metadata filters or vector IDs
     if metadata_filters:
         initial_chunks = get_chunks_by_metadata(metadata_filters, limit=1000)
     else:
-        # Get more chunks than needed to ensure a good pool for ranking
-        # Use -1 for vector_ids to get most recent chunks
-        initial_chunks = get_top_chunks_by_similarity([], top_k=1000)
+        # Use vector_ids to get chunks by similarity
+        initial_chunks = get_top_chunks_by_similarity(vector_ids, top_k=1000)
 
     if not initial_chunks:
-        console.log("[bold yellow]No documents match the metadata filters")
+        console.log("[bold yellow]No documents match the metadata filters or vector search")
         return [], []
 
     # Extract text for BM25 search
@@ -171,21 +189,16 @@ def hybrid_search(
     # Get vector search scores
     vector_scores = {}
     try:
-        index = create_or_load_faiss_index()
-
-        if index.ntotal > 0:
-            # Get query embedding
-            query_embedding = get_embeddings([query])[0].reshape(1, -1)
-
-            # Search FAISS index for all vectors
-            distances, indices = index.search(query_embedding, min(1000, index.ntotal))
-
-            # Convert distances to similarity scores
-            for idx, dist in zip(indices[0], distances[0]):
-                similarity = 1 - (float(dist) ** 2 / 2)
-                vector_scores[int(idx)] = similarity
+        # Reuse the previously calculated vector scores
+        for faiss_id in vector_ids:
+            # Find position in indices array to get corresponding distance
+            if faiss_id in faiss_ids:
+                idx_pos = vector_ids.index(faiss_id)
+                if idx_pos < len(distances[0]):
+                    similarity = 1 - (float(distances[0][idx_pos]) ** 2 / 2)
+                    vector_scores[int(faiss_id)] = similarity
     except Exception as e:
-        console.log(f"[bold red]Error in vector search: {str(e)}")
+        console.log(f"[bold red]Error mapping vector scores: {str(e)}")
 
     # Combine scores
     combined_scores = []
