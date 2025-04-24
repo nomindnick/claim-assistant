@@ -342,9 +342,13 @@ def export_response_as_pdf(
         )
         from reportlab.lib import colors
         
+        # Create the Ask_Exports directory if it doesn't exist
+        exports_dir = Path("./Ask_Exports")
+        exports_dir.mkdir(exist_ok=True, parents=True)
+        
         # Create a timestamped filename
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"Ask_Exports/response_{timestamp}.pdf"
+        filename = str(exports_dir / f"response_{timestamp}.pdf")
         
         # Create the PDF document
         doc = SimpleDocTemplate(
