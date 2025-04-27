@@ -88,6 +88,9 @@ class PageChunk(Base):
     # Document metadata fields that can be different per chunk
     doc_date = sa.Column(sa.Date, nullable=True)
     doc_id = sa.Column(sa.String, nullable=True)
+    
+    # Project name can also be stored at chunk level
+    project_name = sa.Column(sa.String, nullable=True)
 
     # Add a unique chunk_id
     chunk_id = sa.Column(sa.String, nullable=True, index=True, unique=True)
@@ -103,6 +106,7 @@ class PageChunk(Base):
         sa.Index("idx_chunk_type", "chunk_type"),
         sa.Index("idx_doc_date", "doc_date"),
         sa.Index("idx_faiss_id", "faiss_id"),
+        sa.Index("idx_project_name", "project_name"),
     )
 
 
@@ -155,7 +159,9 @@ def save_page_chunk(chunk_data: Dict[str, Any]) -> None:
             page_num = chunk_data.pop("page_num")
             page_hash = chunk_data.pop("page_hash")
             image_path = chunk_data.pop("image_path")
-            thumbnail_path = chunk_data.pop("thumbnail_path", None)  # May not exist in older data
+            thumbnail_path = chunk_data.pop(
+                "thumbnail_path", None
+            )  # May not exist in older data
 
             # Extra metadata that can be applied to the document
             project_name = chunk_data.pop("project_name", None)
@@ -169,6 +175,9 @@ def save_page_chunk(chunk_data: Dict[str, Any]) -> None:
             )
 
             if not document:
+                # Get parties_involved if available
+                parties_involved = chunk_data.pop("parties_involved", None)
+
                 document = Document(
                     file_path=file_path,
                     file_name=file_name,
@@ -176,6 +185,7 @@ def save_page_chunk(chunk_data: Dict[str, Any]) -> None:
                     document_type=document_type,
                     document_id=document_id,
                     document_date=doc_date,
+                    parties_involved=parties_involved,
                 )
                 session.add(document)
                 session.flush()  # Ensure ID is assigned

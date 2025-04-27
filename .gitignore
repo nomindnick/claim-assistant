@@ -39,10 +39,12 @@ index/
 exhibits/
 .env
 *.log
+ask_exports
 
 # Configuration with potential secrets
 ~/.claimctl.ini
 
+~/.Ask_Exports
 
 # Exception for sample files
 !tests/fixtures/sample_pdfs/

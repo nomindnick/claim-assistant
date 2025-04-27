@@ -259,7 +259,7 @@ def classify_chunk(text: str) -> Tuple[str, int]:
 
 
 def create_or_load_faiss_index(
-    dim: int = 1536,
+    dim: int = 3072,  # Updated from 1536 to 3072 for text-embedding-3-large
 ) -> Union[faiss.IndexFlatL2, faiss.IndexIVFFlat]:
     """Create a new FAISS index or load an existing one.
 
@@ -363,8 +363,8 @@ def get_embeddings(texts: List[str]) -> np.ndarray:
                 text = "empty_text"
             text_hash = hash(text) % 10000
             np.random.seed(text_hash)
-            # Determine embedding dimension (usually 1536 for text-embedding-3-large)
-            embedding_dim = 1536
+            # Determine embedding dimension (3072 for text-embedding-3-large)
+            embedding_dim = 3072
             random_embedding = np.random.randn(embedding_dim).astype(np.float32)
             # Normalize to unit length
             random_embedding = random_embedding / np.linalg.norm(random_embedding)
@@ -439,6 +439,25 @@ def process_pdf(
                 # Extract metadata
                 dates = extract_dates(text)
                 doc_ids = extract_document_ids(text)
+                
+                # Convert date strings to Python date objects if possible
+                parsed_dates = []
+                for date_str in dates:
+                    try:
+                        from datetime import datetime
+                        # Try various date formats
+                        for fmt in ["%m/%d/%Y", "%d/%m/%Y", "%Y-%m-%d", "%b %d, %Y", "%d %b %Y"]:
+                            try:
+                                date_obj = datetime.strptime(date_str, fmt).date()
+                                parsed_dates.append(date_obj)
+                                break
+                            except ValueError:
+                                continue
+                    except Exception as e:
+                        console.log(f"[bold yellow]Error parsing date {date_str}: {e}")
+                
+                # Replace string dates with parsed date objects
+                dates = parsed_dates if parsed_dates else []
 
                 # Extract project name if not provided
                 if not project_name:
@@ -446,7 +465,7 @@ def process_pdf(
                     if extracted_project:
                         project_name = extracted_project
 
-                # Extract parties involved
+                # Extract parties involved for the document (not stored in chunk)
                 parties_involved = extract_parties_involved(text)
 
                 # Classify chunk
@@ -488,7 +507,9 @@ def process_pdf(
                     faiss_id = (
                         current_index_size  # This will be the ID in FAISS (0-indexed)
                     )
-                    index.add(np.array([embedding], dtype=np.float32))
+                    embedding_array = np.array([embedding], dtype=np.float32)
+                    console.log(f"Adding embedding with shape {embedding_array.shape} to index with dimension {index.d}")
+                    index.add(embedding_array)
 
                     # Complete the chunk data with all metadata
                     chunk_data.update(
@@ -500,13 +521,14 @@ def process_pdf(
                             "chunk_index": i,
                             "total_chunks": len(text_chunks),
                             "image_path": page_data["image_path"],
-                            "text": chunk_text,
+                            "text": text_chunk,  # Use text_chunk instead of chunk_text
                             "chunk_type": chunk_type,
                             "confidence": confidence,
                             "doc_date": dates[0] if dates else None,
                             "doc_id": doc_ids[0] if doc_ids else None,
                             "project_name": project_name,
-                            "parties_involved": parties_involved,
+                            # Don't include parties_involved in the chunk data
+                            # as it doesn't exist in the PageChunk model
                             "faiss_id": faiss_id,  # Store FAISS ID directly
                         }
                     )
@@ -573,12 +595,12 @@ def batch_generate_embeddings(
                 console.log(f"[bold red]Error in batch {i//batch_size + 1}: {str(e)}")
                 # Create fallback random embeddings for this batch
                 fallback_embeddings = np.zeros(
-                    (len(batch_texts), 1536), dtype=np.float32
+                    (len(batch_texts), 3072), dtype=np.float32
                 )
                 for j, text in enumerate(batch_texts):
                     text_hash = hash(text) % 10000
                     np.random.seed(text_hash)
-                    random_embedding = np.random.randn(1536).astype(np.float32)
+                    random_embedding = np.random.randn(3072).astype(np.float32)
                     # Normalize to unit length
                     random_embedding = random_embedding / np.linalg.norm(
                         random_embedding
@@ -616,12 +638,12 @@ def batch_generate_embeddings(
                 )
                 # Create fallback random embeddings for this batch
                 fallback_embeddings = np.zeros(
-                    (len(batch_texts), 1536), dtype=np.float32
+                    (len(batch_texts), 3072), dtype=np.float32
                 )
                 for j, text in enumerate(batch_texts):
                     text_hash = hash(text) % 10000
                     np.random.seed(text_hash)
-                    random_embedding = np.random.randn(1536).astype(np.float32)
+                    random_embedding = np.random.randn(3072).astype(np.float32)
                     # Normalize to unit length
                     random_embedding = random_embedding / np.linalg.norm(
                         random_embedding
