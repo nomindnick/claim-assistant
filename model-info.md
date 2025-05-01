@@ -1,6 +1,6 @@
 # Model Configuration in Claim Assistant
 
-The application uses OpenAI models in three places, which can be configured in your `~/.claimctl.ini` file:
+The application uses OpenAI models in three places, which can be configured in your `~/.claimctl.ini` file. These settings apply globally but are used in the context of the current active matter:
 
 ## Models Used
 
@@ -31,6 +31,10 @@ You can update the models by editing your `~/.claimctl.ini` file:
 API_KEY = your-api-key
 MODEL = gpt-4o-mini  # Change to any OpenAI completion model
 EMBED_MODEL = text-embedding-3-large  # Change to any OpenAI embedding model
+
+[matter]
+MATTER_DIR = ./matters  # Parent directory for all matters
+CURRENT_MATTER = Smith Construction Claim  # Currently active matter
 ```
 
 Or by setting environment variables:

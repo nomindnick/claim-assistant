@@ -13,6 +13,7 @@ Construction Claim Assistant is designed to help construction professionals, att
 - **Natural Language Queries**: Ask questions in plain English about your claim
 - **Evidence Locator**: Points to exact PDF pages that support your claim
 - **Interactive Results**: Open PDFs directly or export pages as exhibits
+- **Matter Management**: Work on multiple legal matters simultaneously with isolated document storage
 - **Low Resource Usage**: Works efficiently on standard laptops (≤3GB RAM)
 
 ## Installation
@@ -87,6 +88,11 @@ WEIGHT = 0.3
 
 [project]
 DEFAULT_PROJECT = 
+
+[matter]
+MATTER_DIR = ./matters
+CURRENT_MATTER = 
+MATTER_SETTINGS = {}
 ```
 
 You can also use environment variables to override these settings:
@@ -98,14 +104,20 @@ CLAIMCTL_OPENAI_API_KEY=your_key claimctl ask "Where is the delay mentioned?"
 
 ### Ingesting Documents
 
-First, ingest your PDF documents into the system:
+First, create a matter and then ingest your PDF documents into it:
 
 ```bash
-# Ingest one or more PDF files
+# Create a matter to store your documents
+claimctl matter create "Highway Project"
+
+# Ingest one or more PDF files into the current matter
 claimctl ingest path/to/document1.pdf path/to/document2.pdf
 
 # Use shell expansion to ingest multiple files
 claimctl ingest path/to/project/*.pdf
+
+# Ingest into a specific matter
+claimctl ingest path/to/project/*.pdf --matter "Office Building Project"
 ```
 
 The ingestion process:
@@ -116,12 +128,34 @@ The ingestion process:
 - Generates embeddings for semantic search
 - Stores metadata in a local database
 
-### Asking Questions
+### Managing Matters
 
-Once your documents are ingested, you can ask questions:
+The system allows you to work with multiple legal matters simultaneously:
 
 ```bash
+# Create a new matter
+claimctl matter create "Smith Construction Claim"
+
+# List all matters 
+claimctl matter list
+
+# Switch between matters
+claimctl matter switch "Jones Project"
+
+# Show matter information
+claimctl matter info
+```
+
+### Asking Questions
+
+Once your documents are ingested into a matter, you can ask questions:
+
+```bash
+# Using the current active matter
 claimctl ask "Where is Change Order 12 justified?"
+
+# Specify a different matter
+claimctl ask "What caused the delay?" --matter "Jones Project"
 ```
 
 The output includes:
@@ -156,14 +190,22 @@ claimctl config init
 ```
 claim-assistant/
 │
-├── data/               # Data storage
+├── data/               # Global data storage
 │   ├── raw/            # Original PDFs
 │   ├── pages/          # One PNG per PDF page
 │   └── cache/          # SHA-256 hashes, OCR txt, etc.
 │
-├── index/              # Vector index and metadata
+├── index/              # Global vector index and metadata
 │   ├── faiss.idx       # Vector store
 │   └── catalog.db      # SQLite metadata
+│
+├── matters/            # Matter-specific data
+│   ├── Matter1/        # Data for a specific matter
+│   │   ├── data/       # Matter-specific data storage
+│   │   └── index/      # Matter-specific index
+│   └── Matter2/        # Another matter
+│       ├── data/
+│       └── index/
 │
 ├── exhibits/           # Exported page images
 │

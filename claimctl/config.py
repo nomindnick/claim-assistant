@@ -2,7 +2,7 @@
 
 import configparser
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
@@ -62,6 +62,14 @@ class ProjectConfig:
 
 
 @dataclass
+class MatterConfig:
+    """Matter configuration."""
+    MATTER_DIR: str = "./matters"
+    CURRENT_MATTER: Optional[str] = None
+    MATTER_SETTINGS: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class Config:
     """Complete application configuration."""
 
@@ -71,6 +79,7 @@ class Config:
     chunking: ChunkingConfig
     bm25: BM25Config
     project: ProjectConfig
+    matter: MatterConfig  # Add matter configuration
 
 
 def load_config() -> configparser.ConfigParser:
@@ -108,6 +117,11 @@ def load_config() -> configparser.ConfigParser:
     }
     config["project"] = {
         "DEFAULT_PROJECT": "",
+    }
+    config["matter"] = {
+        "MATTER_DIR": "./matters",
+        "CURRENT_MATTER": "",
+        "MATTER_SETTINGS": "{}",
     }
 
     # Read configuration file
@@ -184,6 +198,26 @@ def get_config() -> Config:
     project_config = ProjectConfig(
         DEFAULT_PROJECT=config_parser.get("project", "DEFAULT_PROJECT") or None,
     )
+    
+    # Parse matter config with defaults if section missing
+    if not config_parser.has_section("matter"):
+        config_parser.add_section("matter")
+        config_parser.set("matter", "MATTER_DIR", "./matters")
+        config_parser.set("matter", "CURRENT_MATTER", "")
+        config_parser.set("matter", "MATTER_SETTINGS", "{}")
+    
+    # Try to parse matter settings as JSON
+    import json
+    try:
+        matter_settings = json.loads(config_parser.get("matter", "MATTER_SETTINGS"))
+    except (json.JSONDecodeError, TypeError):
+        matter_settings = {}
+    
+    matter_config = MatterConfig(
+        MATTER_DIR=config_parser.get("matter", "MATTER_DIR"),
+        CURRENT_MATTER=config_parser.get("matter", "CURRENT_MATTER") or None,
+        MATTER_SETTINGS=matter_settings,
+    )
 
     return Config(
         paths=paths_config,
@@ -192,6 +226,7 @@ def get_config() -> Config:
         chunking=chunking_config,
         bm25=bm25_config,
         project=project_config,
+        matter=matter_config,
     )
 
 
@@ -212,6 +247,26 @@ def ensure_dirs() -> None:
     
     # Create ask exports directory
     Path("./Ask_Exports").mkdir(exist_ok=True, parents=True)
+
+
+def get_matter_path(matter_name: str) -> Path:
+    """Get path to matter directory."""
+    config = get_config()
+    return Path(config.matter.MATTER_DIR) / matter_name
+
+
+def get_current_matter() -> Optional[str]:
+    """Get current matter name."""
+    config = get_config()
+    return config.matter.CURRENT_MATTER
+
+
+def set_current_matter(matter_name: str) -> None:
+    """Set current matter."""
+    config = load_config()
+    config["matter"]["CURRENT_MATTER"] = matter_name
+    with open(os.path.expanduser("~/.claimctl.ini"), "w") as f:
+        config.write(f)
 
 
 def show_config() -> Dict[str, Any]:
@@ -247,6 +302,10 @@ def show_config() -> Dict[str, Any]:
         },
         "project": {
             "DEFAULT_PROJECT": config.project.DEFAULT_PROJECT or "None",
+        },
+        "matter": {
+            "MATTER_DIR": config.matter.MATTER_DIR,
+            "CURRENT_MATTER": config.matter.CURRENT_MATTER or "None",
         },
     }
 

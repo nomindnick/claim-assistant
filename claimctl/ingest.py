@@ -14,6 +14,7 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
 from openai import OpenAI
 from rich.progress import Progress, TaskID
+import typer
 
 from .config import ensure_dirs, get_config
 from .database import (
@@ -395,6 +396,7 @@ def process_pdf(
     progress: Progress,
     task_id: TaskID,
     project_name: Optional[str] = None,
+    matter_id: Optional[int] = None,
 ) -> None:
     """Process a PDF file: extract text, metadata, generate embeddings."""
     config = get_config()
@@ -530,6 +532,7 @@ def process_pdf(
                             # Don't include parties_involved in the chunk data
                             # as it doesn't exist in the PageChunk model
                             "faiss_id": faiss_id,  # Store FAISS ID directly
+                            "matter_id": matter_id,  # Add matter_id
                         }
                     )
 
@@ -660,105 +663,141 @@ def ingest_pdfs(
     project_name: Optional[str] = None,
     batch_size: int = 5,
     resume_on_error: bool = True,
+    matter_name: Optional[str] = None,  # Add matter_name parameter
 ) -> None:
-    """Ingest a list of PDF files with batch processing and resume capability.
+    """Ingest a list of PDF files with matter awareness.
 
     Args:
         pdf_paths: List of PDF paths to process
         project_name: Optional project name to associate with documents
         batch_size: Number of documents to process in each batch
         resume_on_error: Whether to continue processing after errors
+        matter_name: Optional matter name to associate with documents
     """
-    # Ensure directories exist
-    ensure_dirs()
-
-    # Initialize database
-    init_database()
-
-    # Create resume log file
-    resume_log_path = Path(get_config().paths.DATA_DIR) / "ingest_resume.log"
-    completed_pdfs = set()
-
-    # Load previously completed files if resume file exists
-    if resume_log_path.exists():
-        try:
-            with open(resume_log_path, "r") as f:
-                completed_pdfs = set(line.strip() for line in f.readlines())
-            console.log(
-                f"[bold yellow]Found {len(completed_pdfs)} previously processed files"
-            )
-        except Exception as e:
-            console.log(f"[bold red]Error reading resume log: {str(e)}")
-
-    # Filter out already processed PDFs if resuming
-    if resume_on_error and completed_pdfs:
-        filtered_paths = [
-            p for p in pdf_paths if str(p.absolute()) not in completed_pdfs
-        ]
-        skipped = len(pdf_paths) - len(filtered_paths)
-        if skipped > 0:
-            console.log(f"[bold yellow]Skipping {skipped} already processed files")
-        pdf_paths = filtered_paths
-
-    # Process PDFs in batches
-    total_pdfs = len(pdf_paths)
-    processed_count = 0
-    error_count = 0
-
-    # Create a single progress context for the entire process
-    with create_progress(f"Processing {total_pdfs} PDFs in batches") as progress:
-        overall_task = progress.add_task(
-            "Overall progress", total=total_pdfs
-        )
-
-        # Process in batches
-        for batch_idx in range(0, total_pdfs, batch_size):
-            batch = pdf_paths[batch_idx : batch_idx + batch_size]
-            progress.update(
-                overall_task,
-                advance=0,
-                description=f"Batch {batch_idx//batch_size + 1}/{math.ceil(total_pdfs/batch_size)}",
-            )
-
-            # Create a task for each PDF in this batch
-            pdf_tasks = {}
-            for pdf_path in batch:
-                task_id = progress.add_task(
-                    f"Processing {pdf_path.name}", total=1
+    # Use current matter if not specified
+    from .config import get_current_matter
+    from .database import get_session, Matter
+    
+    if not matter_name:
+        matter_name = get_current_matter()
+        if not matter_name:
+            console.print("[bold red]No active matter. Use 'matter switch' or specify --matter")
+            raise typer.Exit(1)
+    
+    # Get matter directories
+    with get_session() as session:
+        matter = session.query(Matter).filter(Matter.name == matter_name).first()
+        if not matter:
+            console.print(f"[bold red]Matter '{matter_name}' not found")
+            raise typer.Exit(1)
+            
+        data_dir = Path(matter.data_directory)
+        index_dir = Path(matter.index_directory)
+    
+    # Override data and index directories for this operation
+    config = get_config()
+    original_data_dir = config.paths.DATA_DIR
+    original_index_dir = config.paths.INDEX_DIR
+    
+    # Temporarily set paths for this matter
+    config.paths.DATA_DIR = str(data_dir)
+    config.paths.INDEX_DIR = str(index_dir)
+    
+    try:
+        # Ensure directories exist
+        ensure_dirs()
+    
+        # Initialize database
+        init_database()
+    
+        # Create resume log file for this matter
+        resume_log_path = data_dir / "ingest_resume.log"
+        completed_pdfs = set()
+    
+        # Load previously completed files if resume file exists
+        if resume_log_path.exists():
+            try:
+                with open(resume_log_path, "r") as f:
+                    completed_pdfs = set(line.strip() for line in f.readlines())
+                console.log(
+                    f"[bold yellow]Found {len(completed_pdfs)} previously processed files"
                 )
-                pdf_tasks[pdf_path] = task_id
-
-            # Process each PDF in this batch
-            for pdf_path, task_id in pdf_tasks.items():
-                try:
-                    # Pass the same progress object
-                    process_pdf(pdf_path, progress, task_id, project_name)
-                    processed_count += 1
-
-                    # Mark as completed for resume functionality
-                    with open(resume_log_path, "a") as f:
-                        f.write(f"{pdf_path.absolute()}\n")
-
-                except Exception as e:
-                    console.log(f"[bold red]Error processing {pdf_path}: {str(e)}")
-                    error_count += 1
-                    if not resume_on_error:
-                        console.log(
-                            "[bold red]Aborting due to error (resume_on_error=False)"
-                        )
-                        raise e
-
-            # Update overall progress after each batch
-            progress.update(
-                overall_task,
-                advance=len(batch),
-                description=f"Completed {processed_count}/{total_pdfs} ({error_count} errors)",
+            except Exception as e:
+                console.log(f"[bold red]Error reading resume log: {str(e)}")
+    
+        # Filter out already processed PDFs if resuming
+        if resume_on_error and completed_pdfs:
+            filtered_paths = [
+                p for p in pdf_paths if str(p.absolute()) not in completed_pdfs
+            ]
+            skipped = len(pdf_paths) - len(filtered_paths)
+            if skipped > 0:
+                console.log(f"[bold yellow]Skipping {skipped} already processed files")
+            pdf_paths = filtered_paths
+    
+        # Process PDFs in batches
+        total_pdfs = len(pdf_paths)
+        processed_count = 0
+        error_count = 0
+    
+        # Create a single progress context for the entire process
+        with create_progress(f"Processing {total_pdfs} PDFs in batches") as progress:
+            overall_task = progress.add_task(
+                "Overall progress", total=total_pdfs
             )
-
-    # Final status
-    if error_count > 0:
-        console.log(
-            f"[bold yellow]Ingestion completed with {error_count} errors. {processed_count}/{total_pdfs} files processed successfully."
-        )
-    else:
-        console.log("[bold green]Ingestion complete! All files processed successfully.")
+    
+            # Process in batches
+            for batch_idx in range(0, total_pdfs, batch_size):
+                batch = pdf_paths[batch_idx : batch_idx + batch_size]
+                progress.update(
+                    overall_task,
+                    advance=0,
+                    description=f"Batch {batch_idx//batch_size + 1}/{math.ceil(total_pdfs/batch_size)}",
+                )
+    
+                # Create a task for each PDF in this batch
+                pdf_tasks = {}
+                for pdf_path in batch:
+                    task_id = progress.add_task(
+                        f"Processing {pdf_path.name}", total=1
+                    )
+                    pdf_tasks[pdf_path] = task_id
+    
+                # Process each PDF in this batch
+                for pdf_path, task_id in pdf_tasks.items():
+                    try:
+                        # Pass the same progress object (and matter_id for document creation)
+                        process_pdf(pdf_path, progress, task_id, project_name, matter.id)
+                        processed_count += 1
+    
+                        # Mark as completed for resume functionality
+                        with open(resume_log_path, "a") as f:
+                            f.write(f"{pdf_path.absolute()}\n")
+    
+                    except Exception as e:
+                        console.log(f"[bold red]Error processing {pdf_path}: {str(e)}")
+                        error_count += 1
+                        if not resume_on_error:
+                            console.log(
+                                "[bold red]Aborting due to error (resume_on_error=False)"
+                            )
+                            raise e
+    
+                # Update overall progress after each batch
+                progress.update(
+                    overall_task,
+                    advance=len(batch),
+                    description=f"Completed {processed_count}/{total_pdfs} ({error_count} errors)",
+                )
+    
+        # Final status
+        if error_count > 0:
+            console.log(
+                f"[bold yellow]Ingestion completed with {error_count} errors. {processed_count}/{total_pdfs} files processed successfully."
+            )
+        else:
+            console.log("[bold green]Ingestion complete! All files processed successfully.")
+    finally:
+        # Restore original directories
+        config.paths.DATA_DIR = original_data_dir
+        config.paths.INDEX_DIR = original_index_dir

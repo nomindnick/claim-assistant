@@ -137,7 +137,43 @@ The system provides several enhancements for working with results:
 * **Follow-up Questions**: Type `f` to ask follow-up questions while maintaining conversation context
 * **PDF Export**: Type `p` to export the full response with all referenced documents as a PDF file for later reference
 
-### Configuration Options
+### Matter Management
+
+The system supports working with multiple legal matters simultaneously:
+
+```bash
+# Create a new matter
+python -m claimctl.cli matter create "Smith Construction Claim" --desc "Highway project delay claim"
+
+# List all matters
+python -m claimctl.cli matter list
+
+# Switch to a different matter
+python -m claimctl.cli matter switch "Smith Construction Claim"
+
+# See matter information
+python -m claimctl.cli matter info
+
+# Delete a matter (and optionally its directories)
+python -m claimctl.cli matter delete "Smith Construction Claim"
+```
+
+When working with matters:
+
+- Each matter has its own document storage and search index
+- You must specify or switch to a matter before ingesting documents
+- Documents ingested into one matter are not visible to other matters
+- The current active matter is used by default for all operations
+
+```bash
+# Ingest documents into a specific matter
+python -m claimctl.cli ingest /path/to/pdfs --matter "Smith Construction Claim" 
+
+# Query a specific matter
+python -m claimctl.cli ask "What caused the delay?" --matter "Jones Project"
+```
+
+# Configuration Options
 
 You can edit `~/.claimctl.ini` to change:
 - Data storage locations (DATA_DIR, INDEX_DIR)
@@ -150,6 +186,7 @@ You can edit `~/.claimctl.ini` to change:
 - Chunking parameters (CHUNK_SIZE, CHUNK_OVERLAP)
 - BM25 search parameters (K1, B, WEIGHT)
 - Project settings (DEFAULT_PROJECT)
+- Matter settings (MATTER_DIR, CURRENT_MATTER)
 
 ### Environment Variables
 
@@ -209,17 +246,27 @@ The clear command will ask for confirmation before deleting any data and will pr
 cd ~/Projects/claim-assistant
 source venv/bin/activate
 
-# Clear previous data (optional)
-python -m claimctl.cli clear --all
+# Create and set up a matter
+python -m claimctl.cli matter create "Highway Project"
 
-# Ingest documents
+# Ingest documents into the matter
 python -m claimctl.cli ingest ~/test-pdfs/*.pdf
 
 # Ask a question with default settings (retrieves top 6 documents)
 python -m claimctl.cli ask "Where is Change Order 12 justified?"
 
+# Create another matter and switch to it
+python -m claimctl.cli matter create "Office Building Project"
+python -m claimctl.cli matter switch "Office Building Project"
+
+# Ingest different documents into this matter
+python -m claimctl.cli ingest ~/office-project-docs/*.pdf
+
 # Ask a question with more documents for complex queries
 python -m claimctl.cli ask "Compare all the change orders related to site conditions" --top-k 10
+
+# Switch back to the first matter
+python -m claimctl.cli matter switch "Highway Project"
 
 # Filter results by document type and date range
 python -m claimctl.cli ask "What were the approved costs?" --type "ChangeOrder" --from "2024-01-01"

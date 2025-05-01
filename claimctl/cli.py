@@ -2,15 +2,24 @@
 
 import os
 import sys
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import typer
 from rich.console import Console
+from rich.table import Table
 
 from . import __version__
-from .config import ensure_dirs, get_config, show_config
+from .config import (
+    ensure_dirs, 
+    get_config, 
+    show_config, 
+    get_current_matter, 
+    set_current_matter, 
+    get_matter_path
+)
+from .database import get_session, Matter, Document, init_database
 from .ingest import ingest_pdfs
 from .query import query_documents
 from .utils import console
@@ -45,6 +54,9 @@ def ingest_command(
     ),
     recursive: bool = typer.Option(
         False, "--recursive", "-r", help="Recursively process directories"
+    ),
+    matter: Optional[str] = typer.Option(
+        None, "--matter", "-m", help="Matter name to associate with documents"
     ),
 ) -> None:
     """Ingest PDF files into the claim assistant database."""
@@ -95,6 +107,7 @@ def ingest_command(
             project_name=project,
             batch_size=batch_size,
             resume_on_error=resume,
+            matter_name=matter,  # Pass matter name
         )
     except Exception as e:
         console.print(f"[bold red]Error: {str(e)}")
@@ -131,8 +144,17 @@ def ask_command(
     search_type: str = typer.Option(
         "hybrid", "--search", "-s", help="Search type: hybrid, vector, or keyword"
     ),
+    matter: Optional[str] = typer.Option(
+        None, "--matter", "-m", help="Matter to query"
+    ),
 ) -> None:
     """Ask a question about the construction claim."""
+    # Use current matter if not specified
+    if not matter:
+        matter = get_current_matter()
+        if not matter:
+            console.print("[bold yellow]No active matter. Use 'matter switch' or specify --matter")
+            raise typer.Exit(1)
     try:
         query_documents(
             question,
@@ -145,6 +167,7 @@ def ask_command(
             project,
             parties,
             search_type,
+            matter=matter,  # Pass matter parameter
         )
     except Exception as e:
         console.print(f"[bold red]Error: {str(e)}")
@@ -350,6 +373,244 @@ def clear_command(
         console.print(f"[bold green]Successfully cleared {deleted_count} items")
     else:
         console.print("[bold yellow]No items were cleared")
+
+
+@app.command("matter")
+def matter_command(
+    action: str = typer.Argument(..., help="Action: list, create, switch, info, delete"),
+    name: Optional[str] = typer.Argument(None, help="Matter name"),
+    description: Optional[str] = typer.Option(None, "--desc", help="Matter description"),
+) -> None:
+    """Manage legal matters."""
+    if action.lower() == "list":
+        list_matters()
+    elif action.lower() == "create":
+        create_matter(name, description)
+    elif action.lower() == "switch":
+        switch_matter(name)
+    elif action.lower() == "info":
+        show_matter_info(name)
+    elif action.lower() == "delete":
+        delete_matter(name)
+    else:
+        console.print(f"[bold red]Unknown action: {action}")
+        console.print("Available actions: list, create, switch, info, delete")
+        raise typer.Exit(1)
+
+
+def list_matters() -> None:
+    """List all available matters."""
+    with get_session() as session:
+        matters = session.query(Matter).all()
+        
+        table = Table(title="Legal Matters")
+        table.add_column("ID", justify="right", style="dim")
+        table.add_column("Name", style="bold")
+        table.add_column("Description")
+        table.add_column("Documents", justify="right")
+        table.add_column("Created", justify="right")
+        table.add_column("Last Accessed", justify="right")
+        table.add_column("Current", justify="center")
+        
+        current_matter = get_current_matter()
+        
+        for matter in matters:
+            # Count documents
+            doc_count = session.query(Document).filter(Document.matter_id == matter.id).count()
+            
+            # Format date
+            created_at = matter.created_at.strftime("%Y-%m-%d")
+            last_accessed = matter.last_accessed.strftime("%Y-%m-%d")
+            
+            # Highlight current matter
+            is_current = "✓" if matter.name == current_matter else ""
+            
+            table.add_row(
+                str(matter.id),
+                matter.name,
+                matter.description or "",
+                str(doc_count),
+                created_at,
+                last_accessed,
+                is_current
+            )
+        
+        console.print(table)
+
+
+def create_matter(name: str, description: Optional[str] = None) -> None:
+    """Create a new matter."""
+    if not name:
+        console.print("[bold red]Error: Matter name is required")
+        raise typer.Exit(1)
+        
+    # Initialize database
+    init_database()
+    
+    # Create matter directories
+    matter_dir = get_matter_path(name)
+    data_dir = matter_dir / "data"
+    index_dir = matter_dir / "index"
+    
+    for directory in [matter_dir, data_dir, data_dir / "raw", data_dir / "pages", data_dir / "cache", index_dir]:
+        directory.mkdir(exist_ok=True, parents=True)
+    
+    # Create matter in database
+    try:
+        with get_session() as session:
+            # Check if matter already exists
+            existing = session.query(Matter).filter(Matter.name == name).first()
+            if existing:
+                console.print(f"[bold yellow]Matter '{name}' already exists")
+                raise typer.Exit(1)
+                
+            # Create new matter
+            matter = Matter(
+                name=name,
+                description=description,
+                data_directory=str(data_dir),
+                index_directory=str(index_dir)
+            )
+            session.add(matter)
+            session.commit()
+            
+        console.print(f"[bold green]Matter '{name}' created successfully")
+        
+        # Ask if user wants to switch to new matter
+        switch = typer.confirm(f"Switch to matter '{name}'?", default=True)
+        if switch:
+            switch_matter(name)
+            
+    except Exception as e:
+        console.print(f"[bold red]Error creating matter: {str(e)}")
+        raise typer.Exit(1)
+
+
+def switch_matter(name: str) -> None:
+    """Switch to a different matter."""
+    if not name:
+        console.print("[bold red]Error: Matter name is required")
+        raise typer.Exit(1)
+        
+    try:
+        with get_session() as session:
+            # Find matter
+            matter = session.query(Matter).filter(Matter.name == name).first()
+            if not matter:
+                console.print(f"[bold red]Matter '{name}' not found")
+                raise typer.Exit(1)
+                
+            # Update last accessed timestamp
+            matter.last_accessed = datetime.utcnow()
+            session.commit()
+            
+            # Update current matter in config
+            set_current_matter(name)
+            
+            console.print(f"[bold green]Switched to matter: {name}")
+            
+            # Show matter info
+            show_matter_info(name)
+            
+    except Exception as e:
+        console.print(f"[bold red]Error switching matter: {str(e)}")
+        raise typer.Exit(1)
+
+
+def show_matter_info(name: Optional[str] = None) -> None:
+    """Show matter information."""
+    # Use current matter if not specified
+    if not name:
+        name = get_current_matter()
+        if not name:
+            console.print("[bold yellow]No active matter")
+            console.print("Use 'matter switch <name>' to select a matter")
+            return
+            
+    try:
+        with get_session() as session:
+            matter = session.query(Matter).filter(Matter.name == name).first()
+            if not matter:
+                console.print(f"[bold red]Matter '{name}' not found")
+                return
+                
+            # Count documents
+            doc_count = session.query(Document).filter(Document.matter_id == matter.id).count()
+            
+            # Display matter information
+            console.print(f"[bold]Matter: {matter.name}")
+            if matter.description:
+                console.print(f"[bold]Description: {matter.description}")
+            console.print(f"[bold]Documents: {doc_count}")
+            console.print(f"[bold]Data Directory: {matter.data_directory}")
+            console.print(f"[bold]Index Directory: {matter.index_directory}")
+            console.print(f"[bold]Created: {matter.created_at.strftime('%Y-%m-%d %H:%M:%S')}")
+            console.print(f"[bold]Last Accessed: {matter.last_accessed.strftime('%Y-%m-%d %H:%M:%S')}")
+            
+    except Exception as e:
+        console.print(f"[bold red]Error showing matter info: {str(e)}")
+
+
+def delete_matter(name: str) -> None:
+    """Delete a matter."""
+    if not name:
+        console.print("[bold red]Error: Matter name is required")
+        raise typer.Exit(1)
+        
+    # Check if this is the active matter
+    current_matter = get_current_matter()
+    if current_matter == name:
+        console.print("[bold red]Cannot delete the active matter")
+        console.print("Please switch to a different matter first")
+        raise typer.Exit(1)
+        
+    # Confirm deletion
+    confirm = typer.confirm(f"Are you sure you want to delete matter '{name}'? This will remove all data.", default=False)
+    if not confirm:
+        console.print("[bold yellow]Operation cancelled")
+        return
+        
+    try:
+        with get_session() as session:
+            # Find matter
+            matter = session.query(Matter).filter(Matter.name == name).first()
+            if not matter:
+                console.print(f"[bold red]Matter '{name}' not found")
+                raise typer.Exit(1)
+                
+            # Record paths to delete after database transaction
+            data_dir = Path(matter.data_directory) if matter.data_directory else None
+            index_dir = Path(matter.index_directory) if matter.index_directory else None
+            
+            # Delete matter from database (this will cascade to documents, pages, and chunks)
+            session.delete(matter)
+            session.commit()
+            
+            console.print(f"[bold green]Matter '{name}' deleted from database")
+            
+            # Ask if user wants to delete directories
+            if data_dir or index_dir:
+                delete_dirs = typer.confirm("Delete matter directories as well?", default=True)
+                if delete_dirs:
+                    import shutil
+                    
+                    # Delete directories if they exist
+                    if data_dir and data_dir.exists():
+                        shutil.rmtree(data_dir, ignore_errors=True)
+                        console.print(f"[bold green]Deleted data directory: {data_dir}")
+                        
+                    if index_dir and index_dir.exists():
+                        shutil.rmtree(index_dir, ignore_errors=True)
+                        console.print(f"[bold green]Deleted index directory: {index_dir}")
+                        
+                    # Delete parent matter directory if empty
+                    if data_dir and data_dir.parent.exists() and not any(data_dir.parent.iterdir()):
+                        data_dir.parent.rmdir()
+                        console.print(f"[bold green]Deleted empty matter directory: {data_dir.parent}")
+            
+    except Exception as e:
+        console.print(f"[bold red]Error deleting matter: {str(e)}")
+        raise typer.Exit(1)
 
 
 @app.command("version")

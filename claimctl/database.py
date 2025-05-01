@@ -16,6 +16,23 @@ from .config import get_config
 Base = declarative_base()
 
 
+class Matter(Base):
+    """Model representing a legal matter."""
+    __tablename__ = "matters"
+
+    id = sa.Column(sa.Integer, primary_key=True)
+    name = sa.Column(sa.String, nullable=False, unique=True)
+    description = sa.Column(sa.String, nullable=True)
+    created_at = sa.Column(sa.DateTime, default=datetime.utcnow)
+    last_accessed = sa.Column(sa.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    data_directory = sa.Column(sa.String, nullable=False)
+    index_directory = sa.Column(sa.String, nullable=False)
+    settings = sa.Column(sa.JSON, nullable=True)  # Matter-specific settings
+
+    # Define relationship with documents
+    documents = relationship("Document", back_populates="matter")
+
+
 class Document(Base):
     """Model representing a document."""
 
@@ -36,6 +53,9 @@ class Document(Base):
     updated_at = sa.Column(
         sa.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
+    # Matter relationship
+    matter_id = sa.Column(sa.Integer, sa.ForeignKey("matters.id"), nullable=False)
+    matter = relationship("Matter", back_populates="documents")
 
     # Define relationship with pages
     pages = relationship(
@@ -169,6 +189,11 @@ def save_page_chunk(chunk_data: Dict[str, Any]) -> None:
             document_id = chunk_data.get("doc_id", None)
             doc_date = chunk_data.get("doc_date", None)
 
+            # Extract matter_id if available
+            matter_id = chunk_data.pop("matter_id", None)
+            if not matter_id:
+                raise ValueError("matter_id is required for document creation")
+            
             # Check if document exists, create if not
             document = (
                 session.query(Document).filter(Document.file_path == file_path).first()
@@ -186,6 +211,7 @@ def save_page_chunk(chunk_data: Dict[str, Any]) -> None:
                     document_id=document_id,
                     document_date=doc_date,
                     parties_involved=parties_involved,
+                    matter_id=matter_id,  # Add matter_id
                 )
                 session.add(document)
                 session.flush()  # Ensure ID is assigned

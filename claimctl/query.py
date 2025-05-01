@@ -6,6 +6,7 @@ import subprocess
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
+import typer
 
 import faiss
 import numpy as np
@@ -78,39 +79,74 @@ def search_documents(
     project_name: Optional[str] = None,
     parties: Optional[str] = None,
     search_type: str = "hybrid",
+    matter_name: Optional[str] = None,  # Add matter_name parameter
 ) -> Tuple[List[Dict[str, Any]], List[float]]:
     """Search for documents relevant to the query."""
     config = get_config()
     if not top_k:
         top_k = config.retrieval.TOP_K
-
-    # Prepare metadata filters
-    metadata_filters = {}
-    if doc_type:
-        metadata_filters["document_type"] = doc_type
-    if project_name:
-        metadata_filters["project_name"] = project_name
-    if parties:
-        metadata_filters["parties_involved"] = parties
-
-    # Parse date filters
-    if date_from:
-        parsed_date = parse_date(date_from)
-        if parsed_date:
-            metadata_filters["date_from"] = parsed_date
-
-    if date_to:
-        parsed_date = parse_date(date_to)
-        if parsed_date:
-            metadata_filters["date_to"] = parsed_date
-
-    # Execute search
-    chunks, scores = search_docs(
-        query=query,
-        top_k=top_k,
-        metadata_filters=metadata_filters if metadata_filters else None,
-        search_type=search_type,
-    )
+        
+    # Handle matter-specific search
+    from .config import get_current_matter
+    from .database import get_session, Matter
+    
+    # Use current matter if not specified
+    if not matter_name:
+        matter_name = get_current_matter()
+        if not matter_name:
+            console.print("[bold red]No active matter. Use 'matter switch' or specify --matter")
+            raise typer.Exit(1)
+    
+    # Get matter directories
+    with get_session() as session:
+        matter = session.query(Matter).filter(Matter.name == matter_name).first()
+        if not matter:
+            console.print(f"[bold red]Matter '{matter_name}' not found")
+            raise typer.Exit(1)
+            
+        data_dir = Path(matter.data_directory)
+        index_dir = Path(matter.index_directory)
+    
+    # Override data and index directories for this operation
+    original_data_dir = config.paths.DATA_DIR
+    original_index_dir = config.paths.INDEX_DIR
+    
+    # Temporarily set paths for this matter
+    config.paths.DATA_DIR = str(data_dir)
+    config.paths.INDEX_DIR = str(index_dir)
+    
+    try:
+        # Prepare metadata filters
+        metadata_filters = {}
+        if doc_type:
+            metadata_filters["document_type"] = doc_type
+        if project_name:
+            metadata_filters["project_name"] = project_name
+        if parties:
+            metadata_filters["parties_involved"] = parties
+    
+        # Parse date filters
+        if date_from:
+            parsed_date = parse_date(date_from)
+            if parsed_date:
+                metadata_filters["date_from"] = parsed_date
+    
+        if date_to:
+            parsed_date = parse_date(date_to)
+            if parsed_date:
+                metadata_filters["date_to"] = parsed_date
+    
+        # Execute search
+        chunks, scores = search_docs(
+            query=query,
+            top_k=top_k,
+            metadata_filters=metadata_filters if metadata_filters else None,
+            search_type=search_type,
+        )
+    finally:
+        # Restore original directories
+        config.paths.DATA_DIR = original_data_dir
+        config.paths.INDEX_DIR = original_index_dir
 
     return chunks, scores
 
@@ -326,6 +362,7 @@ def handle_user_commands(
     project_name: Optional[str] = None,
     parties: Optional[str] = None,
     search_type: str = "hybrid",
+    matter: Optional[str] = None,
 ) -> None:
     """Handle user commands for interacting with search results."""
     from .utils import highlight_text
@@ -367,6 +404,7 @@ def handle_user_commands(
                     project_name,
                     parties,
                     search_type,
+                    matter_name=matter,
                 )
 
                 if not new_chunks:
@@ -477,6 +515,7 @@ def handle_user_commands(
                         project_name,
                         parties,
                         search_type,
+                        matter_name=matter,
                     )
 
                     # Filter out the original document
@@ -866,6 +905,7 @@ def query_documents(
     project_name: Optional[str] = None,
     parties: Optional[str] = None,
     search_type: str = "hybrid",
+    matter: Optional[str] = None,
 ) -> None:
     """Query documents based on a natural language question."""
     # Search for relevant documents
@@ -878,6 +918,7 @@ def query_documents(
         project_name,
         parties,
         search_type,
+        matter_name=matter,
     )
 
     if not chunks:
@@ -905,4 +946,5 @@ def query_documents(
             project_name,
             parties,
             search_type,
+            matter,
         )
