@@ -2,11 +2,24 @@
 
 from pathlib import Path
 from typing import List, Tuple
+import sys
+import os
+
+# Add parent directory to path so we can import custom_completer
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Try to import our custom completers, fall back to regular ones if not available
+try:
+    from custom_completer import SafePathCompleter, SafeNestedCompleter
+except ImportError:
+    print("Warning: custom_completer.py not found, using regular completers")
+    from prompt_toolkit.completion import NestedCompleter, PathCompleter
+    SafePathCompleter = PathCompleter
+    SafeNestedCompleter = NestedCompleter
 
 # Type checking imports - mypy will ignore missing stubs
 from prompt_toolkit import PromptSession  # type: ignore
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory  # type: ignore
-from prompt_toolkit.completion import NestedCompleter, PathCompleter  # type: ignore
 from prompt_toolkit.history import FileHistory  # type: ignore
 from prompt_toolkit.styles import Style  # type: ignore
 from rich.console import Console
@@ -63,65 +76,74 @@ class ClaimAssistantShell:
 
     def _create_completer(self) -> None:
         """Create nested completer for command auto-completion."""
-        # Create path completer for file arguments
-        path_completer = PathCompleter(
-            expanduser=True, file_filter=lambda path: path.endswith(".pdf")
+        # Create path completer for file arguments - use our safe version
+        path_completer = SafePathCompleter(
+            expanduser=True, file_filter=lambda path: path and isinstance(path, str) and path.endswith(".pdf")
         )
 
-        # Get matters for command completion
+        # Get matters for command completion - ensure they're all strings
         matters = self._get_matters_for_completion()
-
-        # Create nested completer
-        self.completer = NestedCompleter.from_nested_dict(
-            {
-                "ingest": {
-                    "--project": None,
-                    "-p": None,
-                    "--matter": None,
-                    "-m": None,
-                    "--recursive": None,
-                    "-r": None,
-                    "--batch-size": None,
-                    "-b": None,
-                    "--resume": None,
-                    "--no-resume": None,
-                    path_completer: None,
-                },
-                "ask": None,  # Dynamic completion handled separately
-                "matter": {
-                    "list": None,
-                    "create": None,
-                    "switch": {matter: None for matter in matters},
-                    "info": {matter: None for matter in matters},
-                    "delete": {matter: None for matter in matters},
-                },
-                "config": {
-                    "show": None,
-                    "init": None,
-                },
-                "clear": {
-                    "--database": None,
-                    "-d": None,
-                    "--embeddings": None,
-                    "-e": None,
-                    "--images": None,
-                    "-i": None,
-                    "--cache": None,
-                    "-c": None,
-                    "--exhibits": None,
-                    "-x": None,
-                    "--exports": None,
-                    "-p": None,
-                    "--resume-log": None,
-                    "-r": None,
-                    "--all": None,
-                    "-a": None,
-                },
-                "help": None,
-                "exit": None,
-                "quit": None,
-            }
-        )
+        
+        # Build command hierarchy
+        command_dict = {
+            "ingest": {
+                "--project": None,
+                "-p": None,
+                "--matter": None,
+                "-m": None,
+                "--recursive": None,
+                "-r": None,
+                "--batch-size": None,
+                "-b": None,
+                "--resume": None,
+                "--no-resume": None,
+                # Use explicit string paths - path_completer can sometimes cause issues
+                "": path_completer,
+            },
+            "ask": None,  # Dynamic completion handled separately
+            "matter": {
+                "list": None,
+                "create": None,
+                "switch": {},  # Will be populated with valid matters
+                "info": {},    # Will be populated with valid matters
+                "delete": {},  # Will be populated with valid matters
+            },
+            "config": {
+                "show": None,
+                "init": None,
+            },
+            "clear": {
+                "--database": None,
+                "-d": None,
+                "--embeddings": None,
+                "-e": None,
+                "--images": None,
+                "-i": None,
+                "--cache": None,
+                "-c": None,
+                "--exhibits": None,
+                "-x": None,
+                "--exports": None,
+                "-p": None,
+                "--resume-log": None,
+                "-r": None,
+                "--all": None,
+                "-a": None,
+            },
+            "help": None,
+            "exit": None,
+            "quit": None,
+        }
+        
+        # Safely add matters to the command dictionary
+        for matter in matters:
+            if matter is not None and isinstance(matter, str):
+                command_dict["matter"]["switch"][matter] = None
+                command_dict["matter"]["info"][matter] = None
+                command_dict["matter"]["delete"][matter] = None
+                
+        # Create the completer using our safe version
+        self.completer = SafeNestedCompleter.from_nested_dict(command_dict)
 
     def _update_prompt(self) -> List[Tuple[str, str]]:
         """Update the prompt with current matter information."""
@@ -156,8 +178,22 @@ class ClaimAssistantShell:
         try:
             with get_session() as session:
                 matters = session.query(Matter.name).all()
-                return [m[0] for m in matters]
-        except Exception:
+                # Extract matter names, ensure they're strings, and filter out None values
+                result = []
+                for m in matters:
+                    if m[0] is not None:
+                        try:
+                            # Convert to string if it's not already and validate
+                            matter_name = str(m[0])
+                            if matter_name:  # Skip empty strings
+                                result.append(matter_name)
+                        except (TypeError, ValueError):
+                            # Skip any value that can't be safely converted to string
+                            pass
+                return result
+        except Exception as e:
+            # Log the exception to help with debugging
+            print(f"Error getting matters for completion: {e}")
             return []
 
     def show_welcome(self) -> None:
