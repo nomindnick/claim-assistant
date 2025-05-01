@@ -415,8 +415,12 @@ def list_matters() -> None:
         current_matter = get_current_matter()
         
         for matter in matters:
-            # Count documents
-            doc_count = session.query(Document).filter(Document.matter_id == matter.id).count()
+            # Count documents - handle case where matter_id might be NULL in existing documents
+            try:
+                doc_count = session.query(Document).filter(Document.matter_id == matter.id).count()
+            except Exception as e:
+                console.print(f"[dim]Warning: {str(e)}[/dim]")
+                doc_count = 0
             
             # Format date
             created_at = matter.created_at.strftime("%Y-%m-%d")
@@ -534,8 +538,12 @@ def show_matter_info(name: Optional[str] = None) -> None:
                 console.print(f"[bold red]Matter '{name}' not found")
                 return
                 
-            # Count documents
-            doc_count = session.query(Document).filter(Document.matter_id == matter.id).count()
+            # Count documents - handle case where matter_id might be NULL in existing documents
+            try:
+                doc_count = session.query(Document).filter(Document.matter_id == matter.id).count()
+            except Exception as e:
+                console.print(f"[dim]Warning: {str(e)}[/dim]")
+                doc_count = 0
             
             # Display matter information
             console.print(f"[bold]Matter: {matter.name}")
@@ -618,6 +626,12 @@ def version_command() -> None:
     """Show version information."""
     console.print(f"claim-assistant v{__version__}")
 
+
+# Ensure database is initialized when module is loaded
+try:
+    init_database()
+except Exception as e:
+    console.print(f"[bold red]Warning: Error initializing database: {str(e)}[/bold red]")
 
 # Add the commands to the app
 if __name__ == "__main__":
