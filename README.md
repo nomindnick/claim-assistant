@@ -14,6 +14,7 @@ Construction Claim Assistant is designed to help construction professionals, att
 - **Evidence Locator**: Points to exact PDF pages that support your claim
 - **Interactive Results**: Open PDFs directly or export pages as exhibits
 - **Matter Management**: Work on multiple legal matters simultaneously with isolated document storage
+- **Interactive Shell**: Command-line shell with history, auto-completion, and contextual help
 - **Low Resource Usage**: Works efficiently on standard laptops (≤3GB RAM)
 
 ## Installation
@@ -102,6 +103,24 @@ CLAIMCTL_OPENAI_API_KEY=your_key claimctl ask "Where is the delay mentioned?"
 
 ## Usage
 
+### Launching the Interactive Shell
+
+The easiest way to get started is to use the interactive shell:
+
+```bash
+# Launch the interactive shell
+./run.sh
+
+# Or use the command directly
+python claim_assistant.py
+```
+
+The interactive shell provides:
+- Command history and auto-completion
+- Visual display of the current matter
+- Simplified command syntax
+- Contextual help and tab completion
+
 ### Ingesting Documents
 
 First, create a matter and then ingest your PDF documents into it:
@@ -119,6 +138,8 @@ claimctl ingest path/to/project/*.pdf
 # Ingest into a specific matter
 claimctl ingest path/to/project/*.pdf --matter "Office Building Project"
 ```
+
+You can perform the same operations in the interactive shell with simpler syntax.
 
 The ingestion process:
 - Extracts text from each page

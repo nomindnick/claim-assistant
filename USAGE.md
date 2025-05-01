@@ -19,6 +19,31 @@ This document provides instructions for using the Construction Claim Assistant C
    
    Your OpenAI API key should be set in the configuration.
 
+### Using the Interactive Shell
+
+The interactive shell provides a more user-friendly way to interact with the application:
+
+1. **Launch the shell**:
+   ```bash
+   ./run.sh
+   ```
+   
+   This will start the interactive shell with command history, auto-completion, and visual context.
+
+2. **Command Completion**:
+   - Press Tab to complete commands and see available options
+   - Use arrow keys to navigate command history
+   - Command parameters and subcommands are auto-completed
+
+3. **Simplified Syntax**:
+   - In the shell, you can use simpler syntax (e.g., `ask "What caused the delay?"` instead of `python -m claimctl.cli ask "What caused the delay?"`)
+   - The shell automatically handles formatting commands correctly
+
+4. **Contextual Information**:
+   - The shell prompt shows the currently active matter
+   - Help is available by typing `help`
+   - Exit with `exit` or `quit`
+
 ## Working with Documents
 
 ### Ingesting PDFs
@@ -239,7 +264,9 @@ python -m claimctl.cli clear --resume-log  # Clear the ingestion resume log
 
 The clear command will ask for confirmation before deleting any data and will provide a report of what was cleared.
 
-## Example Workflow
+## Example Workflows
+
+### Using Direct CLI Commands
 
 ```bash
 # Activate environment
@@ -285,4 +312,42 @@ python -m claimctl.cli ask "What were the approved costs?" --type "ChangeOrder" 
 
 # Export response as PDF with all referenced documents
 # Type 'p' at the prompt
+```
+
+### Using the Interactive Shell
+
+```bash
+# Activate environment and launch the shell
+cd ~/Projects/claim-assistant
+./run.sh
+
+# Inside the interactive shell:
+
+# Create and set up a matter
+matter create "Highway Project"
+
+# Ingest documents
+ingest ~/test-pdfs/*.pdf
+
+# Ask a question
+ask Where is Change Order 12 justified?
+
+# Create another matter and switch to it
+matter create "Office Building Project"
+matter switch "Office Building Project"
+
+# Ingest different documents
+ingest ~/office-project-docs/*.pdf
+
+# Ask a complex question
+ask Compare all the change orders related to site conditions --top-k 10
+
+# Switch back to the first matter
+matter switch "Highway Project"
+
+# Filter results by type and date
+ask What were the approved costs? --type ChangeOrder --from 2024-01-01
+
+# Type 'help' for available commands
+# Type 'exit' to quit the shell
 ```

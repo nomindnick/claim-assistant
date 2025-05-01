@@ -27,7 +27,7 @@ from .utils import console
 # Create Typer app
 app = typer.Typer(
     name="claimctl",
-    help="Construction Claim Assistant CLI",
+    help="Construction Claim Assistant CLI (use without arguments for interactive shell)",
     add_completion=False,
 )
 

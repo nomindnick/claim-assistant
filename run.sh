@@ -1,5 +1,5 @@
 #!/bin/bash
-# Simple launcher for claim-assistant
+# Launcher for claim-assistant
 
 # Check if virtual environment exists and activate it
 if [ -d "venv" ]; then
@@ -9,5 +9,11 @@ else
     exit 1
 fi
 
-# Run the CLI with provided arguments
-claimctl "$@"
+# Check for arguments
+if [ $# -eq 0 ]; then
+    # No arguments, run interactive mode
+    python claim_assistant.py
+else
+    # Arguments provided, run normal CLI
+    claimctl "$@"
+fi

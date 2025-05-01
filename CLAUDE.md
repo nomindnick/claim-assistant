@@ -5,8 +5,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build Commands
 - Install: `poetry install`
 - Run CLI: `python -m claimctl.cli` or `./run.sh`
+- Run interactive shell: `./run.sh` or `python claim_assistant.py`
 - Create matter: `python -m claimctl.cli matter create "My Matter"`
 - Switch matter: `python -m claimctl.cli matter switch "My Matter"`
+
+## Interactive Shell Commands
+- Launch shell: `./run.sh` or `python claim_assistant.py`
+- Get help: Type `help` in the shell
+- Create matter: `matter create "My Matter"`
+- Switch matter: `matter switch "My Matter"`
+- Ingest documents: `ingest path/to/files/*.pdf`
+- Ask questions: `ask What caused the delay?`
+- Exit shell: `exit` or `quit`
 
 ## Test Commands
 - All tests: `pytest`

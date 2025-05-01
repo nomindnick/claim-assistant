@@ -1,0 +1,247 @@
+"""Interactive shell for Construction Claim Assistant."""
+
+from pathlib import Path
+from typing import List, Tuple
+
+# Type checking imports - mypy will ignore missing stubs
+from prompt_toolkit import PromptSession  # type: ignore
+from prompt_toolkit.auto_suggest import AutoSuggestFromHistory  # type: ignore
+from prompt_toolkit.completion import NestedCompleter, PathCompleter  # type: ignore
+from prompt_toolkit.history import FileHistory  # type: ignore
+from prompt_toolkit.styles import Style  # type: ignore
+from rich.console import Console
+from rich.panel import Panel
+
+from .cli import app
+from .config import get_config, get_current_matter
+from .database import Matter, get_session
+
+console = Console()
+
+
+class ClaimAssistantShell:
+    """Interactive shell for Construction Claim Assistant."""
+
+    def __init__(self) -> None:
+        """Initialize the shell."""
+        self.running = True
+        self.config = get_config()
+        self.current_matter = get_current_matter()
+
+        # Set up history file
+        history_dir = Path.home() / ".claimctl"
+        history_dir.mkdir(exist_ok=True)
+        self.history_file = history_dir / "history"
+
+        # Set up prompt style
+        self.style = Style.from_dict(
+            {
+                "prompt": "ansigreen bold",
+                "matter": "ansiyellow",
+            }
+        )
+
+        # Set up command completer
+        self._create_completer()
+
+        # Set up prompt session
+        self.session = PromptSession(
+            history=FileHistory(str(self.history_file)),
+            auto_suggest=AutoSuggestFromHistory(),
+            completer=self.completer,
+            style=self.style,
+            complete_while_typing=True,
+        )
+
+    def _create_completer(self) -> None:
+        """Create nested completer for command auto-completion."""
+        # Create path completer for file arguments
+        path_completer = PathCompleter(
+            expanduser=True, file_filter=lambda path: path.endswith(".pdf")
+        )
+
+        # Get matters for command completion
+        matters = self._get_matters_for_completion()
+
+        # Create nested completer
+        self.completer = NestedCompleter.from_nested_dict(
+            {
+                "ingest": {
+                    "--project": None,
+                    "-p": None,
+                    "--matter": None,
+                    "-m": None,
+                    "--recursive": None,
+                    "-r": None,
+                    "--batch-size": None,
+                    "-b": None,
+                    "--resume": None,
+                    "--no-resume": None,
+                    path_completer: None,
+                },
+                "ask": None,  # Dynamic completion handled separately
+                "matter": {
+                    "list": None,
+                    "create": None,
+                    "switch": {matter: None for matter in matters},
+                    "info": {matter: None for matter in matters},
+                    "delete": {matter: None for matter in matters},
+                },
+                "config": {
+                    "show": None,
+                    "init": None,
+                },
+                "clear": {
+                    "--database": None,
+                    "-d": None,
+                    "--embeddings": None,
+                    "-e": None,
+                    "--images": None,
+                    "-i": None,
+                    "--cache": None,
+                    "-c": None,
+                    "--exhibits": None,
+                    "-x": None,
+                    "--exports": None,
+                    "-p": None,
+                    "--resume-log": None,
+                    "-r": None,
+                    "--all": None,
+                    "-a": None,
+                },
+                "help": None,
+                "exit": None,
+                "quit": None,
+            }
+        )
+
+    def _update_prompt(self) -> List[Tuple[str, str]]:
+        """Update the prompt with current matter information."""
+        self.current_matter = get_current_matter()
+        matter_display = (
+            f"{self.current_matter}" if self.current_matter else "no matter"
+        )
+        return [
+            ("class:prompt", "claim-assistant"),
+            ("", " "),
+            ("class:matter", f"[{matter_display}]"),
+            ("", "> "),
+        ]
+
+    def _format_typer_args(self, args: List[str]) -> List[str]:
+        """Format arguments for Typer app."""
+        # Convert our simplified command format to Typer's format
+        if not args:
+            return []
+
+        command = args[0]
+        rest = args[1:]
+
+        if command == "ask" and rest:
+            # Join the rest as a single question string
+            return [command, " ".join(rest)]
+
+        return [command] + rest
+
+    def _get_matters_for_completion(self) -> List[str]:
+        """Get list of matters for command completion."""
+        try:
+            with get_session() as session:
+                matters = session.query(Matter.name).all()
+                return [m[0] for m in matters]
+        except Exception:
+            return []
+
+    def show_welcome(self) -> None:
+        """Show welcome message."""
+        console.print(
+            Panel.fit(
+                f"[bold green]Construction Claim Assistant[/bold green]\n"
+                f"Interactive CLI - Type 'help' for available commands\n"
+                f"Current matter: [yellow]{self.current_matter or 'None'}[/yellow]",
+                title="Welcome",
+                subtitle="v0.1.0",
+            )
+        )
+
+    def show_help(self) -> None:
+        """Show help information."""
+        console.print(
+            Panel(
+                "[bold]Available Commands:[/bold]\n\n"
+                "ingest <pdf_path>      - Process PDF documents\n"
+                "ask <question>         - Ask a question about your claim\n"
+                "matter list            - List available matters\n"
+                "matter create <name>   - Create a new matter\n"
+                "matter switch <name>   - Switch to a different matter\n"
+                "matter info [name]     - Show matter information\n"
+                "matter delete <name>   - Delete a matter\n"
+                "config show            - Show current configuration\n"
+                "clear --all            - Clear all data\n"
+                "help                   - Show this help message\n"
+                "exit                   - Exit the application",
+                title="Help",
+            )
+        )
+
+    def handle_command(self, text: str) -> None:
+        """Handle command input."""
+        if not text.strip():
+            return
+
+        # Parse command
+        parts = text.split()
+        command = parts[0].lower()
+        args = parts[1:]
+
+        if command in ("exit", "quit"):
+            self.running = False
+            return
+
+        elif command == "help":
+            self.show_help()
+            return
+
+        # Format arguments for Typer
+        typer_args = self._format_typer_args([command] + args)
+
+        # Run command through Typer
+        try:
+            app(typer_args)
+        except SystemExit:
+            # Catch SystemExit to prevent shell from exiting
+            pass
+        except Exception as e:
+            console.print(f"[bold red]Error: {str(e)}")
+
+    def run(self) -> None:
+        """Run the interactive shell."""
+        self.show_welcome()
+
+        while self.running:
+            try:
+                # Get command
+                text = self.session.prompt(self._update_prompt())
+
+                # Handle command
+                self.handle_command(text)
+
+                # Refresh completer to get updated matter list
+                self._create_completer()
+
+            except KeyboardInterrupt:
+                continue
+            except EOFError:
+                break
+
+        console.print("Goodbye!")
+
+
+def main() -> None:
+    """Main entry point for the interactive shell."""
+    shell = ClaimAssistantShell()
+    shell.run()
+
+
+if __name__ == "__main__":
+    main()
