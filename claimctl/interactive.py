@@ -14,7 +14,7 @@ from rich.panel import Panel
 
 from .cli import app
 from .config import get_config, get_current_matter
-from .database import Matter, get_session
+from .database import Matter, get_session, init_database
 
 console = Console()
 
@@ -26,6 +26,14 @@ class ClaimAssistantShell:
         """Initialize the shell."""
         self.running = True
         self.config = get_config()
+        
+        # Initialize database to ensure tables exist
+        try:
+            init_database()
+            console.print("[green]Database initialized successfully[/green]")
+        except Exception as e:
+            console.print(f"[bold red]Error initializing database: {str(e)}[/bold red]")
+            
         self.current_matter = get_current_matter()
 
         # Set up history file
