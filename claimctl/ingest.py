@@ -34,20 +34,30 @@ from .utils import (
 
 # Chunk type classification prompt
 CHUNK_TYPE_PROMPT = """
-You are a specialized construction document analyzer for construction claims. Classify this document chunk into one of the following categories and include a confidence score (0-100%):
+You are a specialized construction document analyzer for construction claims with expertise in public agency and school district projects. Classify this document chunk into one of the following categories and include a confidence score (0-100%):
 
-- Email: Any email correspondence between project stakeholders
-- ChangeOrder: Documents describing changes to project scope, timeline, or costs
-- Invoice: Bills, receipts, financial documents showing payments or charges
+- Email: Any email correspondence between project stakeholders (look for headers like From:, To:, Subject:)
+- ChangeOrder: Documents describing changes to project scope, timeline, or costs (look for CO #, PCO, Change Order #)
+- Invoice: Bills, receipts, financial documents showing payments or charges (look for Invoice #, amounts with $ signs)
 - Photo: Document is primarily a photograph with minimal text (construction site images, damage photos)
-- ContractClause: Excerpts from the contract, specifications, or legal agreements
-- Schedule: Project schedules, timelines, Gantt charts, or delay analysis
-- DailyReport: Daily work reports, progress logs, or site condition documentation
-- Drawing: Technical drawings, blueprints, or design documents
-- Submittal: Material or equipment submittals and approvals
-- RFI: Request for Information documents between contractors and designers
-- Claim: Formal claim documents, dispute notices, or entitlement analyses
+- ContractClause: Excerpts from the contract, specifications, or legal agreements (look for section numbering, defined terms)
+- Schedule: Project schedules, timelines, Gantt charts, or delay analysis (look for dates, durations, critical path terms)
+- DailyReport: Daily work reports, progress logs, or site condition documentation (look for date headers, weather conditions)
+- Drawing: Technical drawings, blueprints, or design documents (look for scales, dimensions, minimal text content)
+- Submittal: Material or equipment submittals and approvals (look for submittal numbers, approval stamps)
+- RFI: Request for Information documents between contractors and designers (look for question/answer format)
+- Claim: Formal claim documents, dispute notices, or entitlement analyses (look for claim language, disputed amounts)
+- NoticeOfDelay: Formal notices regarding schedule impacts (look for terms like "hereby notified," "impact," "delay")
+- PublicAgencyDoc: Documents specific to public agencies (look for board approvals, public meeting minutes)
 - Other: Anything that doesn't fit the above categories
+
+Pay special attention to:
+1. Document headers and footers for official document type indicators
+2. Monetary amounts and payment terms
+3. Date formats and schedule references
+4. Signatures and approval indicators
+5. Technical terminology specific to construction
+6. Public agency terminology (e.g., board approval, public works)
 
 Document text:
 {text}
@@ -55,6 +65,7 @@ Document text:
 FORMAT YOUR RESPONSE AS:
 Category: [category name]
 Confidence: [0-100%]
+Reasoning: [brief explanation of why you chose this category]
 """
 
 # Date extraction regex patterns
