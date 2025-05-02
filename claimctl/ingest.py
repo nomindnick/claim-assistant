@@ -98,6 +98,41 @@ PARTIES_PATTERNS = [
     r"(?:Architect|Designer|Engineer):\s*([\w\s\-,\.&]+)(?:\n|$)",
 ]
 
+# Cost and amount extraction patterns
+AMOUNT_PATTERNS = [
+    r"\$\s*(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)",  # $123,456.78
+    r"(?:amount|total|sum|cost|price|value)(?:\s+of)?\s*\$\s*(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)",  # amount of $123,456.78
+    r"(?:USD|dollars)(?:\s+of)?\s*(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)",  # USD 123,456.78
+]
+
+# Time period extraction patterns
+TIME_PERIOD_PATTERNS = [
+    r"(\d+)\s+(?:day|week|month|year)s?",  # 10 days, 2 weeks, etc.
+    r"(?:duration|period|timeframe|delay)(?:\s+of)?\s+(\d+)\s+(?:day|week|month|year)s?",  # duration of 10 days
+]
+
+# Contract section references
+SECTION_PATTERNS = [
+    r"(?:Section|§)\s+(\d+(?:\.\d+)*)",  # Section 3.2.1
+    r"(?:Article|Clause|Paragraph)\s+(\d+(?:\.\d+)*)",  # Article 5.1
+    r"(?:Specification|Spec)\s+Section\s+(\d+(?:\.\d+)*)",  # Specification Section 07.21
+]
+
+# Public agency specific patterns
+PUBLIC_AGENCY_PATTERNS = [
+    r"(?:Board|School Board|Board of Education)\s+(?:approval|approved|meeting)",  # Board approval
+    r"(?:Resolution|Board Resolution)\s+(?:No\.|Number|#)?\s*(\d+(?:-\d+)?)",  # Resolution No. 2024-05
+    r"(?:Public|School)\s+(?:Contract|Agreement)\s+(?:Code|Law)",  # Public Contract Code
+    r"(?:DSA|Division of the State Architect)",  # DSA references (CA specific)
+    r"(?:Bid|RFP|RFQ)\s+(?:No\.|Number|#)?\s*(\w+(?:-\w+)*)",  # Bid No. 2024-001
+]
+
+# Work description patterns
+WORK_DESCRIPTION_PATTERNS = [
+    r"(?:scope of work|work scope)[\s\:]+([\w\s\-,\.&;()]+)(?:\n|$)",  # scope of work: foundation repair
+    r"(?:description of work|work description)[\s\:]+([\w\s\-,\.&;()]+)(?:\n|$)",  # description of work: electrical
+]
+
 
 def extract_dates(text: str) -> List[str]:
     """Extract dates from text using regex patterns."""
@@ -136,6 +171,59 @@ def extract_parties_involved(text: str) -> Optional[str]:
 
     if parties:
         return "; ".join(parties)
+    return None
+
+
+def extract_amounts(text: str) -> List[str]:
+    """Extract monetary amounts from text using regex patterns."""
+    amounts = []
+    for pattern in AMOUNT_PATTERNS:
+        matches = re.findall(pattern, text)
+        amounts.extend(matches)
+    return amounts
+
+
+def extract_time_periods(text: str) -> List[str]:
+    """Extract time periods from text using regex patterns."""
+    periods = []
+    for pattern in TIME_PERIOD_PATTERNS:
+        matches = re.findall(pattern, text)
+        periods.extend(matches)
+    return periods
+
+
+def extract_section_references(text: str) -> List[str]:
+    """Extract contract section references from text using regex patterns."""
+    sections = []
+    for pattern in SECTION_PATTERNS:
+        matches = re.findall(pattern, text)
+        sections.extend(matches)
+    return sections
+
+
+def extract_public_agency_references(text: str) -> List[str]:
+    """Extract public agency references from text using regex patterns."""
+    references = []
+    for pattern in PUBLIC_AGENCY_PATTERNS:
+        matches = re.findall(pattern, text)
+        # For patterns with capturing groups, extend with full match
+        if isinstance(matches, list) and matches and isinstance(matches[0], tuple):
+            references.extend([m[0] for m in matches if m[0]])
+        # For patterns without capturing groups, use full match
+        else:
+            # Get the pattern without capturing groups
+            simple_pattern = pattern.replace("(", "").replace(")", "")
+            full_matches = re.findall(simple_pattern, text)
+            references.extend(full_matches)
+    return references
+
+
+def extract_work_description(text: str) -> Optional[str]:
+    """Extract work description from text using regex patterns."""
+    for pattern in WORK_DESCRIPTION_PATTERNS:
+        match = re.search(pattern, text)
+        if match:
+            return match.group(1).strip()
     return None
 
 
@@ -452,6 +540,11 @@ def process_pdf(
                 # Extract metadata
                 dates = extract_dates(text)
                 doc_ids = extract_document_ids(text)
+                amounts = extract_amounts(text)
+                time_periods = extract_time_periods(text)
+                section_references = extract_section_references(text)
+                public_agency_refs = extract_public_agency_references(text)
+                work_description = extract_work_description(text)
                 
                 # Convert date strings to Python date objects if possible
                 parsed_dates = []
@@ -540,8 +633,11 @@ def process_pdf(
                             "doc_date": dates[0] if dates else None,
                             "doc_id": doc_ids[0] if doc_ids else None,
                             "project_name": project_name,
-                            # Don't include parties_involved in the chunk data
-                            # as it doesn't exist in the PageChunk model
+                            "amount": amounts[0] if amounts else None,
+                            "time_period": time_periods[0] if time_periods else None,
+                            "section_reference": section_references[0] if section_references else None,
+                            "public_agency_reference": public_agency_refs[0] if public_agency_refs else None,
+                            "work_description": work_description,
                             "faiss_id": faiss_id,  # Store FAISS ID directly
                             "matter_id": matter_id,  # Add matter_id
                         }

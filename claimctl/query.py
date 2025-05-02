@@ -85,6 +85,10 @@ def search_documents(
     date_to: Optional[str] = None,
     project_name: Optional[str] = None,
     parties: Optional[str] = None,
+    amount_min: Optional[float] = None,
+    amount_max: Optional[float] = None,
+    section_reference: Optional[str] = None,
+    public_agency: bool = False,
     search_type: str = "hybrid",
     matter_name: Optional[str] = None,  # Add matter_name parameter
 ) -> Tuple[List[Dict[str, Any]], List[float]]:
@@ -142,6 +146,16 @@ def search_documents(
             parsed_date = parse_date(date_to)
             if parsed_date:
                 metadata_filters["date_to"] = parsed_date
+                
+        # Add new metadata filters
+        if amount_min:
+            metadata_filters["amount_min"] = amount_min
+        if amount_max:
+            metadata_filters["amount_max"] = amount_max
+        if section_reference:
+            metadata_filters["section_reference"] = section_reference
+        if public_agency:
+            metadata_filters["public_agency"] = True
     
         # Execute search
         chunks, scores = search_docs(
@@ -180,6 +194,17 @@ def answer_question(
             formatted_chunks += f"Project: {chunk['project_name']}\n"
         if chunk.get("parties_involved"):
             formatted_chunks += f"Parties: {chunk['parties_involved']}\n"
+        # Add new metadata fields if present
+        if chunk.get("amount"):
+            formatted_chunks += f"Amount: {chunk['amount']}\n"
+        if chunk.get("time_period"):
+            formatted_chunks += f"Time Period: {chunk['time_period']}\n"
+        if chunk.get("section_reference"):
+            formatted_chunks += f"Section Reference: {chunk['section_reference']}\n"
+        if chunk.get("public_agency_reference"):
+            formatted_chunks += f"Public Agency Reference: {chunk['public_agency_reference']}\n"
+        if chunk.get("work_description"):
+            formatted_chunks += f"Work Description: {chunk['work_description']}\n"
 
         # Use full chunk text up to context_size limit - improved from 800 chars
         formatted_chunks += f"Text: {chunk['text'][:context_size]}"
@@ -368,6 +393,10 @@ def handle_user_commands(
     date_to: Optional[str] = None,
     project_name: Optional[str] = None,
     parties: Optional[str] = None,
+    amount_min: Optional[float] = None,
+    amount_max: Optional[float] = None,
+    section_reference: Optional[str] = None,
+    public_agency: bool = False,
     search_type: str = "hybrid",
     matter: Optional[str] = None,
 ) -> None:
@@ -410,6 +439,10 @@ def handle_user_commands(
                     date_to,
                     project_name,
                     parties,
+                    amount_min,
+                    amount_max,
+                    section_reference,
+                    public_agency,
                     search_type,
                     matter_name=matter,
                 )
@@ -521,6 +554,10 @@ def handle_user_commands(
                         date_to,
                         project_name,
                         parties,
+                        amount_min,
+                        amount_max,
+                        section_reference,
+                        public_agency,
                         search_type,
                         matter_name=matter,
                     )
@@ -911,6 +948,10 @@ def query_documents(
     date_to: Optional[str] = None,
     project_name: Optional[str] = None,
     parties: Optional[str] = None,
+    amount_min: Optional[float] = None,
+    amount_max: Optional[float] = None,
+    section_reference: Optional[str] = None,
+    public_agency: bool = False,
     search_type: str = "hybrid",
     matter: Optional[str] = None,
 ) -> None:
@@ -924,6 +965,10 @@ def query_documents(
         date_to,
         project_name,
         parties,
+        amount_min,
+        amount_max,
+        section_reference,
+        public_agency,
         search_type,
         matter_name=matter,
     )
@@ -952,6 +997,10 @@ def query_documents(
             date_to,
             project_name,
             parties,
+            amount_min,
+            amount_max,
+            section_reference,
+            public_agency,
             search_type,
             matter,
         )

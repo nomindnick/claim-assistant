@@ -141,6 +141,18 @@ def ask_command(
     parties: Optional[str] = typer.Option(
         None, "--parties", help="Filter by parties involved"
     ),
+    amount_min: Optional[float] = typer.Option(
+        None, "--amount-min", help="Minimum monetary amount"
+    ),
+    amount_max: Optional[float] = typer.Option(
+        None, "--amount-max", help="Maximum monetary amount"
+    ),
+    section: Optional[str] = typer.Option(
+        None, "--section", help="Filter by contract section reference"
+    ),
+    public_agency: bool = typer.Option(
+        False, "--public-agency", help="Only return public agency documents"
+    ),
     search_type: str = typer.Option(
         "hybrid", "--search", "-s", help="Search type: hybrid, vector, or keyword"
     ),
@@ -166,7 +178,11 @@ def ask_command(
             date_to,
             project,
             parties,
-            search_type,
+            amount_min=amount_min,
+            amount_max=amount_max,
+            section_reference=section,
+            public_agency=public_agency,
+            search_type=search_type,
             matter=matter,  # Pass matter parameter
         )
     except Exception as e:

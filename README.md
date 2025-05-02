@@ -10,6 +10,7 @@ Construction Claim Assistant is designed to help construction professionals, att
 
 - **Document Ingestion**: Processes both digital and scanned PDFs with automatic OCR fallback
 - **Smart Categorization**: Classifies documents by type (emails, change orders, invoices, etc.)
+- **Enhanced Metadata Extraction**: Extracts monetary amounts, time periods, contract sections, and work descriptions
 - **Natural Language Queries**: Ask questions in plain English about your claim
 - **Cross-Encoder Reranking**: Advanced relevance ranking of search results for higher precision
 - **Evidence Locator**: Points to exact PDF pages that support your claim

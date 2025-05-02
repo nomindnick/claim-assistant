@@ -75,6 +75,7 @@ During ingestion, the system:
 - Runs OCR if needed for scanned content
 - Saves page images for reference
 - Classifies document types (Email, ChangeOrder, Invoice, etc.)
+- Extracts enhanced metadata (amounts, time periods, section references, etc.)
 - Generates embeddings for semantic search
 - Stores everything in the database
 
@@ -94,8 +95,9 @@ python -m claimctl.cli ask "Where is Change Order 12 justified?" -k 10
 The system will:
 1. Find relevant documents based on semantic similarity (by default, the top 6 documents)
 2. Rerank results using a cross-encoder model for more accurate relevance scoring
-3. Generate a comprehensive answer using GPT-4o-mini
-4. Display source documents with their relevance scores
+3. Extract and analyze metadata from documents (amounts, time periods, section references, etc.)
+4. Generate a comprehensive answer using GPT-4o-mini
+5. Display source documents with their relevance scores and extracted metadata
 
 ### Interactive Commands
 
@@ -167,6 +169,15 @@ python -m claimctl.cli ask "What were the issues?" --from "2024-01-01" --to "202
 
 # Filter by parties involved
 python -m claimctl.cli ask "What were the contract terms?" --parties "ABC Construction"
+
+# Filter by monetary amount range
+python -m claimctl.cli ask "What changes were approved?" --amount-min 10000 --amount-max 50000
+
+# Filter by contract section reference
+python -m claimctl.cli ask "What does the contract say about delays?" --section "3.2.1"
+
+# Only show public agency documents
+python -m claimctl.cli ask "What was the board's decision?" --public-agency
 
 # Change search type (default is hybrid)
 python -m claimctl.cli ask "What is the total cost?" --search vector  # Options: hybrid, vector, keyword

@@ -117,6 +117,13 @@ class PageChunk(Base):
 
     # Add timestamp for indexing/sorting
     processed_at = sa.Column(sa.DateTime, default=datetime.utcnow)
+    
+    # Add new metadata fields
+    amount = sa.Column(sa.String, nullable=True)
+    time_period = sa.Column(sa.String, nullable=True)
+    section_reference = sa.Column(sa.String, nullable=True)
+    public_agency_reference = sa.Column(sa.String, nullable=True)
+    work_description = sa.Column(sa.String, nullable=True)
 
     # Define relationship with page
     page = relationship("Page", back_populates="chunks")
@@ -127,6 +134,8 @@ class PageChunk(Base):
         sa.Index("idx_doc_date", "doc_date"),
         sa.Index("idx_faiss_id", "faiss_id"),
         sa.Index("idx_project_name", "project_name"),
+        sa.Index("idx_section_reference", "section_reference"),
+        sa.Index("idx_public_agency_reference", "public_agency_reference"),
     )
 
 
@@ -508,6 +517,20 @@ def get_chunks_by_metadata(
                 query = query.filter(PageChunk.doc_date >= value)
             elif key == "date_to" and value:
                 query = query.filter(PageChunk.doc_date <= value)
+            # Add new filters
+            elif key == "amount_min" and value:
+                # Convert string amounts to numeric for comparison
+                query = query.filter(
+                    sa.cast(sa.func.replace(sa.func.replace(PageChunk.amount, "$", ""), ",", ""), sa.Float) >= value
+                )
+            elif key == "amount_max" and value:
+                query = query.filter(
+                    sa.cast(sa.func.replace(sa.func.replace(PageChunk.amount, "$", ""), ",", ""), sa.Float) <= value
+                )
+            elif key == "section_reference" and value:
+                query = query.filter(PageChunk.section_reference == value)
+            elif key == "public_agency" and value:
+                query = query.filter(PageChunk.public_agency_reference != None)
 
         # Get results
         chunks = query.order_by(PageChunk.processed_at.desc()).limit(limit).all()
