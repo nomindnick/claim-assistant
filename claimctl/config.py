@@ -35,6 +35,7 @@ class RetrievalConfig:
     SCORE_THRESHOLD: float
     CONTEXT_SIZE: int  # Character limit per chunk for context window
     ANSWER_CONFIDENCE: bool  # Whether to include confidence indicators
+    RERANK_ENABLED: bool = True  # Whether to use cross-encoder reranking
 
 
 @dataclass
@@ -105,6 +106,7 @@ def load_config() -> configparser.ConfigParser:
         "SCORE_THRESHOLD": "0.6",
         "CONTEXT_SIZE": "2000",
         "ANSWER_CONFIDENCE": "True",
+        "RERANK_ENABLED": "True",
     }
     config["chunking"] = {
         "CHUNK_SIZE": "400",
@@ -168,6 +170,9 @@ def get_config() -> Config:
         CONTEXT_SIZE=config_parser.getint("retrieval", "CONTEXT_SIZE", fallback=2000),
         ANSWER_CONFIDENCE=config_parser.getboolean(
             "retrieval", "ANSWER_CONFIDENCE", fallback=True
+        ),
+        RERANK_ENABLED=config_parser.getboolean(
+            "retrieval", "RERANK_ENABLED", fallback=True
         ),
     )
 
@@ -290,6 +295,7 @@ def show_config() -> Dict[str, Any]:
             "SCORE_THRESHOLD": config.retrieval.SCORE_THRESHOLD,
             "CONTEXT_SIZE": config.retrieval.CONTEXT_SIZE,
             "ANSWER_CONFIDENCE": config.retrieval.ANSWER_CONFIDENCE,
+            "RERANK_ENABLED": config.retrieval.RERANK_ENABLED,
         },
         "chunking": {
             "CHUNK_SIZE": config.chunking.CHUNK_SIZE,

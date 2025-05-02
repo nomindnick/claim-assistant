@@ -20,6 +20,7 @@ from .database import (
     get_chunks_by_metadata,
     get_top_chunks_by_similarity,
 )
+from .rerank import rerank_with_cross_encoder
 from .utils import console
 
 
@@ -231,8 +232,15 @@ def hybrid_search(
         if score > 0:
             result_chunks.append(initial_chunks[doc_idx])
             result_scores.append(score)
-
-    return result_chunks, result_scores
+    
+    # Get config
+    config = get_config()
+    
+    # Add reranking step here, but only if enabled
+    if config.retrieval.RERANK_ENABLED:
+        return rerank_with_cross_encoder(query, result_chunks, result_scores)
+    else:
+        return result_chunks, result_scores
 
 
 def search_documents(
@@ -278,7 +286,11 @@ def search_documents(
         result_chunks = [chunks[idx] for idx, _ in keyword_results]
         result_scores = [score for _, score in keyword_results]
 
-        return result_chunks, result_scores
+        # Apply reranking if enabled
+        if config.retrieval.RERANK_ENABLED:
+            return rerank_with_cross_encoder(query, result_chunks, result_scores)
+        else:
+            return result_chunks, result_scores
     else:  # vector search (default fallback)
         from .ingest import create_or_load_faiss_index, get_embeddings
 
@@ -399,8 +411,12 @@ def search_documents(
             # If we have chunks but no scores (edge case), create dummy scores
             if chunks and not filtered_scores:
                 filtered_scores = [1.0] * len(chunks)
-
-            return chunks, filtered_scores
+            
+            # Apply reranking if enabled
+            if config.retrieval.RERANK_ENABLED and chunks:
+                return rerank_with_cross_encoder(query, chunks, filtered_scores)
+            else:
+                return chunks, filtered_scores
 
         except Exception as e:
             console.log(f"[bold red]Error in search: {str(e)}")

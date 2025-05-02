@@ -1,0 +1,61 @@
+"""Reranking module for improving search result relevance."""
+
+from typing import Any, Dict, List, Tuple, Optional
+
+from rich.console import Console
+console = Console()
+
+
+def rerank_with_cross_encoder(
+    query: str, 
+    chunks: List[Dict[str, Any]], 
+    scores: List[float],
+    top_k: Optional[int] = None
+) -> Tuple[List[Dict[str, Any]], List[float]]:
+    """Rerank search results using a cross-encoder model.
+    
+    Args:
+        query: The user's query
+        chunks: List of document chunks from initial retrieval
+        scores: Initial relevance scores
+        top_k: Number of results to return after reranking
+        
+    Returns:
+        Tuple of (reranked_chunks, reranked_scores)
+    """
+    if not chunks:
+        return chunks, scores
+        
+    if top_k is None:
+        top_k = len(chunks)
+    
+    try:
+        # Import here to avoid dependencies if not used
+        from sentence_transformers import CrossEncoder
+        
+        # Choose a lightweight cross-encoder model
+        model = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
+        
+        # Prepare query-document pairs
+        query_doc_pairs = [(query, chunk["text"][:512]) for chunk in chunks]
+        
+        # Get relevance scores from cross-encoder
+        rerank_scores = model.predict(query_doc_pairs)
+        
+        # Create combined results
+        results = list(zip(chunks, rerank_scores))
+        
+        # Sort by cross-encoder score
+        results.sort(key=lambda x: x[1], reverse=True)
+        
+        # Return top_k results
+        reranked_chunks = [item[0] for item in results[:top_k]]
+        reranked_scores = [item[1] for item in results[:top_k]]
+        
+        console.log(f"Reranked {len(chunks)} results using cross-encoder")
+        return reranked_chunks, reranked_scores
+        
+    except Exception as e:
+        console.log(f"[bold red]Error during reranking: {str(e)}")
+        console.log("[yellow]Falling back to original search results")
+        return chunks, scores

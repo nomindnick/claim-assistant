@@ -11,6 +11,7 @@ Construction Claim Assistant is designed to help construction professionals, att
 - **Document Ingestion**: Processes both digital and scanned PDFs with automatic OCR fallback
 - **Smart Categorization**: Classifies documents by type (emails, change orders, invoices, etc.)
 - **Natural Language Queries**: Ask questions in plain English about your claim
+- **Cross-Encoder Reranking**: Advanced relevance ranking of search results for higher precision
 - **Evidence Locator**: Points to exact PDF pages that support your claim
 - **Interactive Results**: Open PDFs directly or export pages as exhibits
 - **Matter Management**: Work on multiple legal matters simultaneously with isolated document storage
@@ -24,6 +25,7 @@ Construction Claim Assistant is designed to help construction professionals, att
 - Python 3.10 or higher
 - Tesseract OCR engine (for scanned document processing)
 - OpenAI API key
+- sentence-transformers (automatically installed during setup)
 
 ### Quick Install
 
@@ -77,6 +79,7 @@ TOP_K = 6
 SCORE_THRESHOLD = 0.6
 CONTEXT_SIZE = 2000
 ANSWER_CONFIDENCE = True
+RERANK_ENABLED = True
 
 [chunking]
 CHUNK_SIZE = 400

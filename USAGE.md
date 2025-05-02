@@ -93,8 +93,9 @@ python -m claimctl.cli ask "Where is Change Order 12 justified?" -k 10
 
 The system will:
 1. Find relevant documents based on semantic similarity (by default, the top 6 documents)
-2. Generate a comprehensive answer using GPT-4o-mini
-3. Display source documents with their relevance scores
+2. Rerank results using a cross-encoder model for more accurate relevance scoring
+3. Generate a comprehensive answer using GPT-4o-mini
+4. Display source documents with their relevance scores
 
 ### Interactive Commands
 
@@ -128,6 +129,27 @@ python -m claimctl.cli ask "What caused the delay?" --md
 ```
 
 ## Advanced Usage
+
+### Cross-Encoder Reranking
+
+The system uses a cross-encoder model to improve search result relevance:
+
+```bash
+# Enable reranking (default)
+python -m claimctl.cli ask "What caused the delay?" 
+
+# Disable reranking for faster results (less accurate)
+python -m claimctl.cli ask "What caused the delay?" --no-rerank
+```
+
+Cross-encoder models provide more accurate relevance scoring by processing query-document pairs through a single model, rather than encoding them separately. This approach:
+
+- Improves ranking precision for complex queries
+- Provides better handling of queries with multiple concepts or technical terms
+- Can distinguish between documents that merely mention relevant terms and those that directly address the query
+- Is particularly effective at identifying relevant clauses in contracts and legal documents
+
+The system uses the 'cross-encoder/ms-marco-MiniLM-L-6-v2' model by default, which offers a good balance between performance and accuracy.
 
 ### Filtering and Refining Queries
 
@@ -208,6 +230,7 @@ You can edit `~/.claimctl.ini` to change:
   - SCORE_THRESHOLD: Minimum similarity score for documents
   - CONTEXT_SIZE: Character limit per chunk for context window
   - ANSWER_CONFIDENCE: Whether to include confidence indicators
+  - RERANK_ENABLED: Whether to use cross-encoder reranking (default is True)
 - Chunking parameters (CHUNK_SIZE, CHUNK_OVERLAP)
 - BM25 search parameters (K1, B, WEIGHT)
 - Project settings (DEFAULT_PROJECT)
