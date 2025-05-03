@@ -68,6 +68,11 @@ python -m claimctl.cli ingest /path/to/directory --batch-size 10
 
 # Resume processing from a previous interrupted run
 python -m claimctl.cli ingest /path/to/directory --resume
+
+# Control chunking methods
+python -m claimctl.cli ingest /path/to/directory --adaptive-chunking
+python -m claimctl.cli ingest /path/to/directory --no-semantic-chunking
+python -m claimctl.cli ingest /path/to/directory --no-hierarchical-chunking
 ```
 
 During ingestion, the system:
@@ -76,6 +81,8 @@ During ingestion, the system:
 - Saves page images for reference
 - Classifies document types (Email, ChangeOrder, Invoice, etc.)
 - Extracts enhanced metadata (amounts, time periods, section references, etc.)
+- Analyzes document structure for optimal chunking
+- Creates semantic chunks respecting document boundaries
 - Generates embeddings for semantic search
 - Stores everything in the database
 
@@ -131,6 +138,60 @@ python -m claimctl.cli ask "What caused the delay?" --md
 ```
 
 ## Advanced Usage
+
+### Advanced Document Chunking
+
+The system uses several sophisticated methods for dividing documents into chunks:
+
+```bash
+# Use all chunking methods (default)
+python -m claimctl.cli ingest documents/*.pdf
+
+# Use adaptive chunking that automatically detects document structure
+python -m claimctl.cli ingest documents/*.pdf --adaptive-chunking
+
+# Use only semantic chunking (no hierarchical or adaptive)
+python -m claimctl.cli ingest documents/*.pdf --no-hierarchical-chunking --no-adaptive-chunking
+
+# Disable semantic chunking and use traditional character-based chunking
+python -m claimctl.cli ingest documents/*.pdf --no-semantic-chunking
+```
+
+#### Chunking Methods Explained
+
+1. **Regular Chunking**: Traditional method that splits text by character count with attention to natural separators like paragraphs.
+
+2. **Semantic Chunking**: Uses embeddings to identify natural semantic boundaries in text, keeping related content together even if it exceeds standard character limits.
+
+3. **Hierarchical Chunking**: Creates a hierarchical representation of structured documents (like contracts) to preserve section relationships.
+
+4. **Adaptive Chunking**: Automatically analyzes document structure and selects the optimal chunking method based on content type.
+
+For large documents (>500K characters), the system automatically uses memory-optimized processing that:
+- Segments the document into manageable parts
+- Processes each segment using the appropriate chunking method
+- Removes duplicate chunks at segment boundaries
+- Provides progress tracking throughout the process
+
+### Chunk Visualization Tool
+
+A specialized tool is included to help visualize and compare different chunking methods:
+
+```bash
+# Compare all chunking methods on a specific PDF page
+python test_chunking.py compare path/to/document.pdf --page 0
+
+# Visualize a single chunking method
+python test_chunking.py visualize path/to/document.pdf --method adaptive
+```
+
+The visualization provides:
+- Color-coded visual representation of chunks
+- Highlighted text showing exact chunk boundaries
+- Statistical comparison of chunk sizes and distribution
+- Search functionality to find text across chunks
+
+This tool is particularly useful for understanding how different chunking strategies affect document representation and retrieval.
 
 ### Cross-Encoder Reranking
 
@@ -242,7 +303,14 @@ You can edit `~/.claimctl.ini` to change:
   - CONTEXT_SIZE: Character limit per chunk for context window
   - ANSWER_CONFIDENCE: Whether to include confidence indicators
   - RERANK_ENABLED: Whether to use cross-encoder reranking (default is True)
-- Chunking parameters (CHUNK_SIZE, CHUNK_OVERLAP)
+- Chunking parameters:
+  - CHUNK_SIZE: Maximum chunk size in characters
+  - CHUNK_OVERLAP: Overlap between chunks in characters
+  - SEMANTIC_CHUNKING: Enable semantic chunking (default is True)
+  - HIERARCHICAL_CHUNKING: Enable hierarchical chunking for structured documents (default is True)
+  - ADAPTIVE_CHUNKING: Enable automatic structure detection (default is True)
+  - LARGE_DOC_THRESHOLD: Character threshold for large document optimization (default is 500000)
+  - SIMILARITY_THRESHOLD: Threshold for detecting duplicate chunks (default is 0.8)
 - BM25 search parameters (K1, B, WEIGHT)
 - Project settings (DEFAULT_PROJECT)
 - Matter settings (MATTER_DIR, CURRENT_MATTER)

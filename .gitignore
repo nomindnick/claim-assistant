@@ -56,3 +56,4 @@ ask_exports
 !data/cache/.gitkeep
 !index/.gitkeep
 !exhibits/.gitkeep
+**/.claude/settings.local.json

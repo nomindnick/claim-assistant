@@ -24,6 +24,7 @@ from .database import (
     save_faiss_id_mapping,
     save_page_chunk,
 )
+from .semantic_chunking import create_semantic_chunks, create_hierarchical_chunks, fallback_chunk_text
 from .utils import (
     calculate_sha256,
     console,
@@ -577,12 +578,29 @@ def process_pdf(
                 # Classify chunk
                 chunk_type, confidence = classify_chunk(text)
 
-                # Create chunks for better semantic search
+                # Get chunking config
                 chunk_size = config.chunking.CHUNK_SIZE
                 chunk_overlap = config.chunking.CHUNK_OVERLAP
-
-                # Only chunk text if it exceeds the minimum length
-                text_chunks = chunk_text(text, chunk_size, chunk_overlap)
+                use_semantic = config.chunking.SEMANTIC_CHUNKING
+                use_hierarchical = config.chunking.HIERARCHICAL_CHUNKING
+                use_adaptive = config.chunking.ADAPTIVE_CHUNKING
+                
+                # Choose chunking method based on config
+                if use_adaptive:
+                    # Use adaptive chunking to automatically detect document structure
+                    console.log("[green]Using adaptive chunking to detect document structure")
+                    text_chunks = create_adaptive_chunks(text, chunk_size, chunk_overlap, progress)
+                elif use_semantic:
+                    if use_hierarchical and (chunk_type == "ContractClause" or chunk_type == "ChangeOrder"):
+                        # Use hierarchical chunking for structured documents
+                        text_chunks = create_hierarchical_chunks(text)
+                    else:
+                        # Use semantic chunking for other documents
+                        text_chunks = create_semantic_chunks(text, chunk_size, chunk_overlap)
+                else:
+                    # Use legacy chunking
+                    text_chunks = fallback_chunk_text(text, chunk_size, chunk_overlap)
+                    
                 console.log(f"Created {len(text_chunks)} chunks from page {page_num+1}")
 
                 # Prepare all chunks for batched embedding generation

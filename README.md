@@ -11,12 +11,15 @@ Construction Claim Assistant is designed to help construction professionals, att
 - **Document Ingestion**: Processes both digital and scanned PDFs with automatic OCR fallback
 - **Smart Categorization**: Classifies documents by type (emails, change orders, invoices, etc.)
 - **Enhanced Metadata Extraction**: Extracts monetary amounts, time periods, contract sections, and work descriptions
+- **Advanced Semantic Chunking**: Automatically adapts chunking strategy based on document structure
+- **Memory-Optimized Processing**: Efficiently handles very large documents with streaming techniques
 - **Natural Language Queries**: Ask questions in plain English about your claim
 - **Cross-Encoder Reranking**: Advanced relevance ranking of search results for higher precision
 - **Evidence Locator**: Points to exact PDF pages that support your claim
 - **Interactive Results**: Open PDFs directly or export pages as exhibits
 - **Matter Management**: Work on multiple legal matters simultaneously with isolated document storage
 - **Interactive Shell**: Command-line shell with history, auto-completion, and contextual help
+- **Chunk Visualization**: Tools to visualize and compare different document chunking methods
 - **Low Resource Usage**: Works efficiently on standard laptops (≤3GB RAM)
 
 ## Installation
@@ -85,6 +88,11 @@ RERANK_ENABLED = True
 [chunking]
 CHUNK_SIZE = 400
 CHUNK_OVERLAP = 100
+SEMANTIC_CHUNKING = True
+HIERARCHICAL_CHUNKING = True
+ADAPTIVE_CHUNKING = True
+LARGE_DOC_THRESHOLD = 500000
+SIMILARITY_THRESHOLD = 0.8
 
 [bm25]
 K1 = 1.5
@@ -210,6 +218,11 @@ claimctl config show
 claimctl config init
 ```
 
+## Documentation
+
+- [USAGE.md](USAGE.md): Detailed usage guide including advanced features
+- [docs/chunking.md](docs/chunking.md): Documentation on advanced document chunking features
+
 ## Project Structure
 
 ```
@@ -219,6 +232,9 @@ claim-assistant/
 │   ├── raw/            # Original PDFs
 │   ├── pages/          # One PNG per PDF page
 │   └── cache/          # SHA-256 hashes, OCR txt, etc.
+│
+├── docs/               # Additional documentation
+│   └── chunking.md     # Advanced chunking documentation
 │
 ├── index/              # Global vector index and metadata
 │   ├── faiss.idx       # Vector store
@@ -238,7 +254,10 @@ claim-assistant/
 │   ├── ingest.py       # PDF processing 
 │   ├── query.py        # Question answering
 │   ├── config.py       # Configuration management
+│   ├── semantic_chunking.py # Advanced chunking functionality
 │   └── utils.py        # Utility functions
+│
+├── test_chunking.py    # Chunking visualization tool
 │
 └── tests/              # Automated tests
 ```

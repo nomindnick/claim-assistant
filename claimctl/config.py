@@ -44,6 +44,11 @@ class ChunkingConfig:
 
     CHUNK_SIZE: int
     CHUNK_OVERLAP: int
+    SEMANTIC_CHUNKING: bool = True  # Enable by default
+    HIERARCHICAL_CHUNKING: bool = True  # Enable by default
+    ADAPTIVE_CHUNKING: bool = True  # Enable adaptive structure detection
+    LARGE_DOC_THRESHOLD: int = 500000  # Character threshold for large doc processing
+    SIMILARITY_THRESHOLD: float = 0.8  # Threshold for duplicate chunk detection
 
 
 @dataclass
@@ -111,6 +116,11 @@ def load_config() -> configparser.ConfigParser:
     config["chunking"] = {
         "CHUNK_SIZE": "400",
         "CHUNK_OVERLAP": "100",
+        "SEMANTIC_CHUNKING": "True",
+        "HIERARCHICAL_CHUNKING": "True",
+        "ADAPTIVE_CHUNKING": "True",
+        "LARGE_DOC_THRESHOLD": "500000",
+        "SIMILARITY_THRESHOLD": "0.8",
     }
     config["bm25"] = {
         "K1": "1.5",
@@ -180,6 +190,11 @@ def get_config() -> Config:
     chunking_config = ChunkingConfig(
         CHUNK_SIZE=config_parser.getint("chunking", "CHUNK_SIZE"),
         CHUNK_OVERLAP=config_parser.getint("chunking", "CHUNK_OVERLAP"),
+        SEMANTIC_CHUNKING=config_parser.getboolean("chunking", "SEMANTIC_CHUNKING", fallback=True),
+        HIERARCHICAL_CHUNKING=config_parser.getboolean("chunking", "HIERARCHICAL_CHUNKING", fallback=True),
+        ADAPTIVE_CHUNKING=config_parser.getboolean("chunking", "ADAPTIVE_CHUNKING", fallback=True),
+        LARGE_DOC_THRESHOLD=config_parser.getint("chunking", "LARGE_DOC_THRESHOLD", fallback=500000),
+        SIMILARITY_THRESHOLD=config_parser.getfloat("chunking", "SIMILARITY_THRESHOLD", fallback=0.8),
     )
 
     # Parse BM25 config with defaults if section missing
@@ -300,6 +315,11 @@ def show_config() -> Dict[str, Any]:
         "chunking": {
             "CHUNK_SIZE": config.chunking.CHUNK_SIZE,
             "CHUNK_OVERLAP": config.chunking.CHUNK_OVERLAP,
+            "SEMANTIC_CHUNKING": config.chunking.SEMANTIC_CHUNKING,
+            "HIERARCHICAL_CHUNKING": config.chunking.HIERARCHICAL_CHUNKING,
+            "ADAPTIVE_CHUNKING": config.chunking.ADAPTIVE_CHUNKING,
+            "LARGE_DOC_THRESHOLD": config.chunking.LARGE_DOC_THRESHOLD,
+            "SIMILARITY_THRESHOLD": config.chunking.SIMILARITY_THRESHOLD,
         },
         "bm25": {
             "K1": config.bm25.K1,

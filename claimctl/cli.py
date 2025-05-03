@@ -58,6 +58,18 @@ def ingest_command(
     matter: Optional[str] = typer.Option(
         None, "--matter", "-m", help="Matter name to associate with documents"
     ),
+    semantic_chunking: bool = typer.Option(
+        None, "--semantic-chunking/--no-semantic-chunking", 
+        help="Use semantic chunking instead of character-based chunking"
+    ),
+    hierarchical_chunking: bool = typer.Option(
+        None, "--hierarchical-chunking/--no-hierarchical-chunking", 
+        help="Use hierarchical chunking for structured documents"
+    ),
+    adaptive_chunking: bool = typer.Option(
+        None, "--adaptive-chunking/--no-adaptive-chunking", 
+        help="Automatically detect document structure and choose optimal chunking method"
+    ),
 ) -> None:
     """Ingest PDF files into the claim assistant database."""
     # Expand directories to individual PDF files if needed
@@ -102,6 +114,17 @@ def ingest_command(
             raise typer.Exit(0)
 
     try:
+        # Get config to update chunking options
+        config = get_config()
+        
+        # Update config with command-line options if provided
+        if semantic_chunking is not None:
+            config.chunking.SEMANTIC_CHUNKING = semantic_chunking
+        if hierarchical_chunking is not None:
+            config.chunking.HIERARCHICAL_CHUNKING = hierarchical_chunking
+        if adaptive_chunking is not None:
+            config.chunking.ADAPTIVE_CHUNKING = adaptive_chunking
+        
         ingest_pdfs(
             expanded_paths,
             project_name=project,
