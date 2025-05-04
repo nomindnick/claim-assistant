@@ -73,6 +73,10 @@ python -m claimctl.cli ingest /path/to/directory --resume
 python -m claimctl.cli ingest /path/to/directory --adaptive-chunking
 python -m claimctl.cli ingest /path/to/directory --no-semantic-chunking
 python -m claimctl.cli ingest /path/to/directory --no-hierarchical-chunking
+
+# Control ingestion logging
+python -m claimctl.cli ingest /path/to/directory --logging      # Enable detailed logging (default)
+python -m claimctl.cli ingest /path/to/directory --no-logging   # Disable detailed logging
 ```
 
 During ingestion, the system:
@@ -138,6 +142,46 @@ python -m claimctl.cli ask "What caused the delay?" --md
 ```
 
 ## Advanced Usage
+
+### Ingestion Logging and Analysis
+
+The system provides detailed logging of document ingestion to help track processing metrics, classification decisions, and potential issues:
+
+```bash
+# View recent ingestion logs
+python -m claimctl.cli logs list
+
+# Limit the number of logs shown
+python -m claimctl.cli logs list --limit 10
+
+# View logs for a specific matter
+python -m claimctl.cli logs list --matter "Highway Project"
+
+# Show detailed summary of the most recent log
+python -m claimctl.cli logs show
+
+# Show summary of a specific log file
+python -m claimctl.cli logs show ingestion_20250503_123456.jsonl
+
+# Show log for a specific matter
+python -m claimctl.cli logs show --matter "Highway Project"
+```
+
+The ingestion logs capture:
+
+- **Document Processing Metrics**: Pages processed, chunks created, processing times
+- **Classification Decisions**: Document type classifications with confidence scores
+- **Metadata Extraction**: Success rates for various metadata fields
+- **Chunking Methods**: Which chunking strategies were applied to each document
+- **Errors and Warnings**: Any issues encountered during processing
+
+These logs help identify:
+- Documents that caused processing problems
+- Classification patterns and distribution
+- Extraction performance for different document types
+- Processing bottlenecks and optimization opportunities
+
+The logs are stored as JSONL files in each matter's `logs` directory, allowing for easy parsing and analysis with external tools if needed.
 
 ### Advanced Document Chunking
 
@@ -428,8 +472,14 @@ cd ~/Projects/claim-assistant
 # Create and set up a matter
 matter create "Highway Project"
 
-# Ingest documents
+# Ingest documents (with various options)
 ingest ~/test-pdfs/*.pdf
+ingest ~/test-pdfs/*.pdf --no-logging  # Disable detailed logging
+ingest ~/test-pdfs/*.pdf --batch-size 10
+
+# View ingestion logs
+logs list
+logs show
 
 # Ask a question
 ask Where is Change Order 12 justified?

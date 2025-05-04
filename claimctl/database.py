@@ -169,10 +169,20 @@ def is_page_processed(page_hash: str) -> bool:
 
     Now that pages can have multiple chunks, we just check if any chunks exist
     for this page hash, as an indicator of whether this page has been processed.
+    
+    Also checks for the actual chunks to handle cases where the database was cleared 
+    but the resume log wasn't.
     """
     with get_session() as session:
+        # First check if the page exists
         page = session.query(Page).filter(Page.page_hash == page_hash).first()
-        return page is not None
+        if not page:
+            return False
+            
+        # Also check if there are any chunks for this page
+        # This handles cases where database was partially cleared or migrated
+        chunk_count = session.query(PageChunk).filter(PageChunk.page_id == page.id).count()
+        return chunk_count > 0
 
 
 def save_page_chunk(chunk_data: Dict[str, Any]) -> None:

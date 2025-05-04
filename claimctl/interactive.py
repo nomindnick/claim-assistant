@@ -97,6 +97,8 @@ class ClaimAssistantShell:
                 "-b": None,
                 "--resume": None,
                 "--no-resume": None,
+                "--logging": None,
+                "--no-logging": None,
                 # Use explicit string paths - path_completer can sometimes cause issues
                 "": path_completer,
             },
@@ -107,6 +109,18 @@ class ClaimAssistantShell:
                 "switch": {},  # Will be populated with valid matters
                 "info": {},    # Will be populated with valid matters
                 "delete": {},  # Will be populated with valid matters
+            },
+            "logs": {
+                "list": {
+                    "--matter": None,
+                    "-m": None,
+                    "--limit": None,
+                    "-l": None,
+                },
+                "show": {
+                    "--matter": None, 
+                    "-m": None,
+                },
             },
             "config": {
                 "show": None,
@@ -147,7 +161,23 @@ class ClaimAssistantShell:
 
     def _update_prompt(self) -> List[Tuple[str, str]]:
         """Update the prompt with current matter information."""
+        # Get fresh matter information from config
         self.current_matter = get_current_matter()
+        
+        # Verify matter actually exists in database
+        if self.current_matter:
+            try:
+                with get_session() as session:
+                    matter_exists = session.query(Matter).filter(Matter.name == self.current_matter).first() is not None
+                    if not matter_exists:
+                        # Matter doesn't exist but config thinks it does
+                        from .config import set_current_matter
+                        set_current_matter("")
+                        self.current_matter = ""
+            except Exception:
+                # If there's a database error, just use what we have from config
+                pass
+                
         matter_display = (
             f"{self.current_matter}" if self.current_matter else "no matter"
         )
@@ -176,6 +206,13 @@ class ClaimAssistantShell:
     def _get_matters_for_completion(self) -> List[str]:
         """Get list of matters for command completion."""
         try:
+            # Ensure database is initialized before querying
+            try:
+                init_database()
+            except Exception as db_init_error:
+                # Log but continue, as tables might already exist
+                print(f"Note: Database initialization attempt: {db_init_error}")
+                
             with get_session() as session:
                 matters = session.query(Matter.name).all()
                 # Extract matter names, ensure they're strings, and filter out None values
@@ -220,6 +257,8 @@ class ClaimAssistantShell:
                 "matter switch <name>   - Switch to a different matter\n"
                 "matter info [name]     - Show matter information\n"
                 "matter delete <name>   - Delete a matter\n"
+                "logs list              - List recent ingestion logs\n"
+                "logs show [log_file]   - Show ingestion log summary\n"
                 "config show            - Show current configuration\n"
                 "clear --all            - Clear all data\n"
                 "help                   - Show this help message\n"

@@ -18,6 +18,7 @@ import typer
 
 from .config import ensure_dirs, get_config
 from .database import (
+    Document,
     get_database_engine,
     init_database,
     is_page_processed,
@@ -128,19 +129,49 @@ PUBLIC_AGENCY_PATTERNS = [
     r"(?:Bid|RFP|RFQ)\s+(?:No\.|Number|#)?\s*(\w+(?:-\w+)*)",  # Bid No. 2024-001
 ]
 
+# Function to validate regex patterns
+def validate_regex_patterns(patterns_list, name):
+    """Validates a list of regex patterns and replaces invalid ones with safe defaults."""
+    for i, pattern in enumerate(patterns_list):
+        try:
+            re.compile(pattern)
+        except re.error as e:
+            print(f"Warning: Invalid {name} pattern at index {i}: {pattern}")
+            print(f"Error: {str(e)}")
+            # Replace with a simpler, valid pattern
+            if i < len(patterns_list):
+                patterns_list[i] = r"Invalid Pattern Removed"
+    return patterns_list
+
 # Work description patterns
 WORK_DESCRIPTION_PATTERNS = [
     r"(?:scope of work|work scope)[\s\:]+([\w\s\-,\.&;()]+)(?:\n|$)",  # scope of work: foundation repair
     r"(?:description of work|work description)[\s\:]+([\w\s\-,\.&;()]+)(?:\n|$)",  # description of work: electrical
 ]
 
+# Validate all regex patterns
+DATE_PATTERNS = validate_regex_patterns(DATE_PATTERNS, "date")
+ID_PATTERNS = validate_regex_patterns(ID_PATTERNS, "document ID")
+PROJECT_PATTERNS = validate_regex_patterns(PROJECT_PATTERNS, "project name")
+PARTIES_PATTERNS = validate_regex_patterns(PARTIES_PATTERNS, "parties")
+AMOUNT_PATTERNS = validate_regex_patterns(AMOUNT_PATTERNS, "amount")
+TIME_PERIOD_PATTERNS = validate_regex_patterns(TIME_PERIOD_PATTERNS, "time period")
+SECTION_PATTERNS = validate_regex_patterns(SECTION_PATTERNS, "section")
+PUBLIC_AGENCY_PATTERNS = validate_regex_patterns(PUBLIC_AGENCY_PATTERNS, "public agency")
+WORK_DESCRIPTION_PATTERNS = validate_regex_patterns(WORK_DESCRIPTION_PATTERNS, "work description")
+
 
 def extract_dates(text: str) -> List[str]:
     """Extract dates from text using regex patterns."""
     dates = []
     for pattern in DATE_PATTERNS:
-        matches = re.findall(pattern, text)
-        dates.extend(matches)
+        try:
+            matches = re.findall(pattern, text)
+            dates.extend(matches)
+        except Exception as e:
+            # Log the error and continue with the next pattern
+            print(f"Warning: Error in date regex pattern '{pattern}': {str(e)}")
+            continue
     return dates
 
 
@@ -148,17 +179,27 @@ def extract_document_ids(text: str) -> List[str]:
     """Extract document IDs from text using regex patterns."""
     ids = []
     for pattern in ID_PATTERNS:
-        matches = re.findall(pattern, text)
-        ids.extend(matches)
+        try:
+            matches = re.findall(pattern, text)
+            ids.extend(matches)
+        except Exception as e:
+            # Log the error and continue with the next pattern
+            print(f"Warning: Error in document ID regex pattern '{pattern}': {str(e)}")
+            continue
     return ids
 
 
 def extract_project_name(text: str) -> Optional[str]:
     """Extract project name from text using regex patterns."""
     for pattern in PROJECT_PATTERNS:
-        match = re.search(pattern, text)
-        if match:
-            return match.group(1).strip()
+        try:
+            match = re.search(pattern, text)
+            if match:
+                return match.group(1).strip()
+        except Exception as e:
+            # Log the error and continue with the next pattern
+            print(f"Warning: Error in project name regex pattern '{pattern}': {str(e)}")
+            continue
     return None
 
 
@@ -166,9 +207,14 @@ def extract_parties_involved(text: str) -> Optional[str]:
     """Extract parties involved from text using regex patterns."""
     parties = []
     for pattern in PARTIES_PATTERNS:
-        match = re.search(pattern, text)
-        if match:
-            parties.append(match.group(1).strip())
+        try:
+            match = re.search(pattern, text)
+            if match:
+                parties.append(match.group(1).strip())
+        except Exception as e:
+            # Log the error and continue with the next pattern
+            print(f"Warning: Error in parties regex pattern '{pattern}': {str(e)}")
+            continue
 
     if parties:
         return "; ".join(parties)
@@ -179,8 +225,13 @@ def extract_amounts(text: str) -> List[str]:
     """Extract monetary amounts from text using regex patterns."""
     amounts = []
     for pattern in AMOUNT_PATTERNS:
-        matches = re.findall(pattern, text)
-        amounts.extend(matches)
+        try:
+            matches = re.findall(pattern, text)
+            amounts.extend(matches)
+        except Exception as e:
+            # Log the error and continue with the next pattern
+            print(f"Warning: Error in amount regex pattern '{pattern}': {str(e)}")
+            continue
     return amounts
 
 
@@ -188,8 +239,13 @@ def extract_time_periods(text: str) -> List[str]:
     """Extract time periods from text using regex patterns."""
     periods = []
     for pattern in TIME_PERIOD_PATTERNS:
-        matches = re.findall(pattern, text)
-        periods.extend(matches)
+        try:
+            matches = re.findall(pattern, text)
+            periods.extend(matches)
+        except Exception as e:
+            # Log the error and continue with the next pattern
+            print(f"Warning: Error in time period regex pattern '{pattern}': {str(e)}")
+            continue
     return periods
 
 
@@ -197,8 +253,13 @@ def extract_section_references(text: str) -> List[str]:
     """Extract contract section references from text using regex patterns."""
     sections = []
     for pattern in SECTION_PATTERNS:
-        matches = re.findall(pattern, text)
-        sections.extend(matches)
+        try:
+            matches = re.findall(pattern, text)
+            sections.extend(matches)
+        except Exception as e:
+            # Log the error and continue with the next pattern
+            print(f"Warning: Error in section regex pattern '{pattern}': {str(e)}")
+            continue
     return sections
 
 
@@ -206,25 +267,32 @@ def extract_public_agency_references(text: str) -> List[str]:
     """Extract public agency references from text using regex patterns."""
     references = []
     for pattern in PUBLIC_AGENCY_PATTERNS:
-        matches = re.findall(pattern, text)
-        # For patterns with capturing groups, extend with full match
-        if isinstance(matches, list) and matches and isinstance(matches[0], tuple):
-            references.extend([m[0] for m in matches if m[0]])
-        # For patterns without capturing groups, use full match
-        else:
-            # Get the pattern without capturing groups
-            simple_pattern = pattern.replace("(", "").replace(")", "")
-            full_matches = re.findall(simple_pattern, text)
-            references.extend(full_matches)
+        try:
+            matches = re.findall(pattern, text)
+            # For patterns with capturing groups, extend with full match
+            if isinstance(matches, list) and matches and isinstance(matches[0], tuple):
+                references.extend([m[0] for m in matches if m[0]])
+            # For patterns without capturing groups, use full match
+            else:
+                references.extend(matches)
+        except Exception as e:
+            # Log the error and continue with the next pattern
+            print(f"Warning: Error in regex pattern '{pattern}': {str(e)}")
+            continue
     return references
 
 
 def extract_work_description(text: str) -> Optional[str]:
     """Extract work description from text using regex patterns."""
     for pattern in WORK_DESCRIPTION_PATTERNS:
-        match = re.search(pattern, text)
-        if match:
-            return match.group(1).strip()
+        try:
+            match = re.search(pattern, text)
+            if match:
+                return match.group(1).strip()
+        except Exception as e:
+            # Log the error and continue with the next pattern
+            print(f"Warning: Error in work description regex pattern '{pattern}': {str(e)}")
+            continue
     return None
 
 
@@ -497,17 +565,31 @@ def process_pdf(
     task_id: TaskID,
     project_name: Optional[str] = None,
     matter_id: Optional[int] = None,
+    ingestion_logger: Optional[Any] = None,  # Added logger parameter
 ) -> None:
     """Process a PDF file: extract text, metadata, generate embeddings."""
     config = get_config()
     console.log(f"Processing {pdf_path}")
+    
+    # Start timing document processing
+    doc_start_time = time.time()
+    
+    # Log document processing start
+    if ingestion_logger:
+        ingestion_logger.log_document_start(pdf_path)
 
     # Initialize document
     try:
         doc = fitz.open(pdf_path)
     except Exception as e:
-        console.log(f"[bold red]Error opening {pdf_path}: {str(e)}")
+        error_msg = f"Error opening {pdf_path}: {str(e)}"
+        console.log(f"[bold red]{error_msg}")
         progress.update(task_id, advance=1, description=f"Error: {str(e)}")
+        
+        # Log document error
+        if ingestion_logger:
+            ingestion_logger.log_error(pdf_path, "file_open_error", str(e))
+            ingestion_logger.log_document_complete(pdf_path, time.time() - doc_start_time, 0, 0, success=False)
         return
 
     # Get/create FAISS index
@@ -516,6 +598,12 @@ def process_pdf(
     # Process each page
     total_pages = len(doc)
     progress.update(task_id, total=total_pages, description="Starting")
+    
+    # Initialize counters for document stats
+    processed_pages = 0
+    total_chunks = 0
+    extraction_successes = 0
+    extraction_failures = 0
 
     # Begin transaction - we'll save the index at the end only if all pages process successfully
     try:
@@ -537,6 +625,7 @@ def process_pdf(
             try:
                 page_data = process_page(doc, page_num)
                 text = page_data["text"]
+                processed_pages += 1
 
                 # Extract metadata
                 dates = extract_dates(text)
@@ -546,6 +635,27 @@ def process_pdf(
                 section_references = extract_section_references(text)
                 public_agency_refs = extract_public_agency_references(text)
                 work_description = extract_work_description(text)
+                
+                # Log metadata extractions in logger
+                if ingestion_logger:
+                    # Log extractions with success/failure
+                    ingestion_logger.log_extraction(pdf_path, page_num, "dates", str(dates), bool(dates))
+                    ingestion_logger.log_extraction(pdf_path, page_num, "doc_ids", str(doc_ids), bool(doc_ids))
+                    ingestion_logger.log_extraction(pdf_path, page_num, "amounts", str(amounts), bool(amounts))
+                    ingestion_logger.log_extraction(pdf_path, page_num, "time_periods", str(time_periods), bool(time_periods))
+                    ingestion_logger.log_extraction(pdf_path, page_num, "section_references", str(section_references), bool(section_references))
+                    ingestion_logger.log_extraction(pdf_path, page_num, "public_agency_refs", str(public_agency_refs), bool(public_agency_refs))
+                    ingestion_logger.log_extraction(pdf_path, page_num, "work_description", work_description, bool(work_description))
+                
+                # Track extraction metrics
+                extraction_successes += sum([
+                    bool(dates), bool(doc_ids), bool(amounts), bool(time_periods),
+                    bool(section_references), bool(public_agency_refs), bool(work_description)
+                ])
+                extraction_failures += sum([
+                    not bool(dates), not bool(doc_ids), not bool(amounts), not bool(time_periods),
+                    not bool(section_references), not bool(public_agency_refs), not bool(work_description)
+                ])
                 
                 # Convert date strings to Python date objects if possible
                 parsed_dates = []
@@ -562,6 +672,8 @@ def process_pdf(
                                 continue
                     except Exception as e:
                         console.log(f"[bold yellow]Error parsing date {date_str}: {e}")
+                        if ingestion_logger:
+                            ingestion_logger.log_error(pdf_path, "date_parse_error", f"Error parsing date {date_str}: {str(e)}", page_num)
                 
                 # Replace string dates with parsed date objects
                 dates = parsed_dates if parsed_dates else []
@@ -571,12 +683,20 @@ def process_pdf(
                     extracted_project = extract_project_name(text)
                     if extracted_project:
                         project_name = extracted_project
+                        if ingestion_logger:
+                            ingestion_logger.log_extraction(pdf_path, page_num, "project_name", extracted_project, True)
 
                 # Extract parties involved for the document (not stored in chunk)
                 parties_involved = extract_parties_involved(text)
+                if ingestion_logger and parties_involved:
+                    ingestion_logger.log_extraction(pdf_path, page_num, "parties_involved", parties_involved, True)
 
                 # Classify chunk
                 chunk_type, confidence = classify_chunk(text)
+                
+                # Log classification in logger
+                if ingestion_logger:
+                    ingestion_logger.log_classification(pdf_path, page_num, 0, chunk_type, confidence)
 
                 # Get chunking config
                 chunk_size = config.chunking.CHUNK_SIZE
@@ -586,22 +706,28 @@ def process_pdf(
                 use_adaptive = config.chunking.ADAPTIVE_CHUNKING
                 
                 # Choose chunking method based on config
+                chunking_method = "default"
                 if use_adaptive:
                     # Use adaptive chunking to automatically detect document structure
                     console.log("[green]Using adaptive chunking to detect document structure")
                     text_chunks = create_adaptive_chunks(text, chunk_size, chunk_overlap, progress)
+                    chunking_method = "adaptive"
                 elif use_semantic:
                     if use_hierarchical and (chunk_type == "ContractClause" or chunk_type == "ChangeOrder"):
                         # Use hierarchical chunking for structured documents
                         text_chunks = create_hierarchical_chunks(text)
+                        chunking_method = "hierarchical"
                     else:
                         # Use semantic chunking for other documents
                         text_chunks = create_semantic_chunks(text, chunk_size, chunk_overlap)
+                        chunking_method = "semantic"
                 else:
                     # Use legacy chunking
                     text_chunks = fallback_chunk_text(text, chunk_size, chunk_overlap)
+                    chunking_method = "fallback"
                     
-                console.log(f"Created {len(text_chunks)} chunks from page {page_num+1}")
+                console.log(f"Created {len(text_chunks)} chunks from page {page_num+1} using {chunking_method} chunking")
+                total_chunks += len(text_chunks)
 
                 # Prepare all chunks for batched embedding generation
                 chunk_data_list = []
@@ -634,6 +760,17 @@ def process_pdf(
                     embedding_array = np.array([embedding], dtype=np.float32)
                     console.log(f"Adding embedding with shape {embedding_array.shape} to index with dimension {index.d}")
                     index.add(embedding_array)
+                    
+                    # Individual chunk classification if needed
+                    if i > 0 and len(text_chunk) > 500:
+                        # For significant chunks after the first one, we might want to classify them individually
+                        try:
+                            sub_chunk_type, sub_confidence = classify_chunk(text_chunk)
+                            if ingestion_logger:
+                                ingestion_logger.log_classification(pdf_path, page_num, i, sub_chunk_type, sub_confidence)
+                        except Exception as e:
+                            # If classification fails, use the page's classification
+                            sub_chunk_type, sub_confidence = chunk_type, confidence
 
                     # Complete the chunk data with all metadata
                     chunk_data.update(
@@ -669,15 +806,44 @@ def process_pdf(
                 )
 
             except Exception as e:
-                console.log(f"[bold red]Error processing page {page_num+1}: {str(e)}")
+                error_msg = f"Error processing page {page_num+1}: {str(e)}"
+                console.log(f"[bold red]{error_msg}")
                 progress.update(task_id, advance=1, description=f"Error: {str(e)}")
+                
+                # Log page processing error
+                if ingestion_logger:
+                    ingestion_logger.log_error(pdf_path, "page_processing_error", str(e), page_num)
 
         # All pages processed successfully, save index
         save_faiss_index(index)
+        
+        # Log successful document completion
+        doc_processing_time = time.time() - doc_start_time
+        if ingestion_logger:
+            ingestion_logger.log_document_complete(
+                pdf_path, 
+                doc_processing_time,
+                processed_pages, 
+                total_chunks, 
+                success=True
+            )
 
     except Exception as e:
-        console.log(f"[bold red]Error during PDF processing: {str(e)}")
+        error_msg = f"Error during PDF processing: {str(e)}"
+        console.log(f"[bold red]{error_msg}")
         progress.update(task_id, description=f"Failed: {str(e)}")
+        
+        # Log document failure
+        if ingestion_logger:
+            ingestion_logger.log_error(pdf_path, "document_processing_error", str(e))
+            ingestion_logger.log_document_complete(
+                pdf_path, 
+                time.time() - doc_start_time,
+                processed_pages, 
+                total_chunks, 
+                success=False
+            )
+        
         # Index will not be saved, keeping the previous state
 
     # Close document
@@ -789,6 +955,7 @@ def ingest_pdfs(
     batch_size: int = 5,
     resume_on_error: bool = True,
     matter_name: Optional[str] = None,  # Add matter_name parameter
+    enable_logging: bool = True,  # Enable ingestion logging by default
 ) -> None:
     """Ingest a list of PDF files with matter awareness.
 
@@ -798,9 +965,10 @@ def ingest_pdfs(
         batch_size: Number of documents to process in each batch
         resume_on_error: Whether to continue processing after errors
         matter_name: Optional matter name to associate with documents
+        enable_logging: Whether to enable detailed ingestion logging (default: True)
     """
     # Use current matter if not specified
-    from .config import get_current_matter
+    from .config import get_current_matter, set_current_matter
     from .database import get_session, Matter
     
     if not matter_name:
@@ -809,13 +977,25 @@ def ingest_pdfs(
             console.print("[bold red]No active matter. Use 'matter switch' or specify --matter")
             raise typer.Exit(1)
     
+    # Ensure database tables exist before querying
+    try:
+        init_database()
+    except Exception as db_init_error:
+        console.log(f"Note: Database initialization attempt: {db_init_error}")
+        
     # Get matter directories
     with get_session() as session:
         matter = session.query(Matter).filter(Matter.name == matter_name).first()
         if not matter:
-            console.print(f"[bold red]Matter '{matter_name}' not found")
+            # We have a matter name in config, but it doesn't exist in DB
+            # This can happen after clearing the database
+            console.print(f"[bold red]Matter '{matter_name}' not found in database")
+            console.print(f"[bold yellow]The active matter was cleared. Please create a new matter.")
+            # Reset current matter in config since it no longer exists
+            set_current_matter("")
             raise typer.Exit(1)
             
+        matter_dir = Path(matter.data_directory).parent  # Parent directory of the data directory
         data_dir = Path(matter.data_directory)
         index_dir = Path(matter.index_directory)
     
@@ -828,6 +1008,16 @@ def ingest_pdfs(
     config.paths.DATA_DIR = str(data_dir)
     config.paths.INDEX_DIR = str(index_dir)
     
+    # Initialize ingestion logger if enabled
+    ingestion_logger = None
+    if enable_logging:
+        from .ingestion_logger import IngestionLogger
+        try:
+            ingestion_logger = IngestionLogger(matter_name, matter_dir)
+            console.log(f"[green]Ingestion logging enabled for matter '{matter_name}'")
+        except Exception as e:
+            console.log(f"[yellow]Warning: Could not initialize ingestion logger: {e}")
+    
     try:
         # Ensure directories exist
         ensure_dirs()
@@ -838,9 +1028,24 @@ def ingest_pdfs(
         # Create resume log file for this matter
         resume_log_path = data_dir / "ingest_resume.log"
         completed_pdfs = set()
+        
+        # Check if this is a fresh matter (just created)
+        try:
+            with get_session() as check_session:
+                doc_count = check_session.query(Document).filter(Document.matter_id == matter.id).count()
+                is_fresh_matter = doc_count == 0
+        except Exception as e:
+            console.log(f"[bold yellow]Error checking if matter is fresh: {e}")
+            # Assume it's a fresh matter to force reprocessing in case of errors
+            is_fresh_matter = True
+        
+        # If this is a fresh matter, we should force reprocessing by ignoring the resume log
+        if is_fresh_matter and resume_log_path.exists():
+            console.log("[bold yellow]Fresh matter detected, clearing resume log to force reprocessing")
+            resume_log_path.unlink()
     
-        # Load previously completed files if resume file exists
-        if resume_log_path.exists():
+        # Load previously completed files if resume file exists and we're not starting fresh
+        if resume_log_path.exists() and not is_fresh_matter:
             try:
                 with open(resume_log_path, "r") as f:
                     completed_pdfs = set(line.strip() for line in f.readlines())
@@ -850,8 +1055,8 @@ def ingest_pdfs(
             except Exception as e:
                 console.log(f"[bold red]Error reading resume log: {str(e)}")
     
-        # Filter out already processed PDFs if resuming
-        if resume_on_error and completed_pdfs:
+        # Filter out already processed PDFs if resuming and we have a valid resume log
+        if resume_on_error and completed_pdfs and not is_fresh_matter:
             filtered_paths = [
                 p for p in pdf_paths if str(p.absolute()) not in completed_pdfs
             ]
@@ -864,6 +1069,10 @@ def ingest_pdfs(
         total_pdfs = len(pdf_paths)
         processed_count = 0
         error_count = 0
+        
+        # Start logging session if logger is available
+        if ingestion_logger:
+            ingestion_logger.start_session(total_pdfs)
     
         # Create a single progress context for the entire process
         with create_progress(f"Processing {total_pdfs} PDFs in batches") as progress:
@@ -891,8 +1100,8 @@ def ingest_pdfs(
                 # Process each PDF in this batch
                 for pdf_path, task_id in pdf_tasks.items():
                     try:
-                        # Pass the same progress object (and matter_id for document creation)
-                        process_pdf(pdf_path, progress, task_id, project_name, matter.id)
+                        # Pass the same progress object, matter_id, and logger
+                        process_pdf(pdf_path, progress, task_id, project_name, matter.id, ingestion_logger)
                         processed_count += 1
     
                         # Mark as completed for resume functionality
@@ -901,6 +1110,11 @@ def ingest_pdfs(
     
                     except Exception as e:
                         console.log(f"[bold red]Error processing {pdf_path}: {str(e)}")
+                        
+                        # Log the error in the ingestion logger
+                        if ingestion_logger:
+                            ingestion_logger.log_error(pdf_path, "batch_processing_error", str(e))
+                            
                         error_count += 1
                         if not resume_on_error:
                             console.log(
@@ -914,6 +1128,32 @@ def ingest_pdfs(
                     advance=len(batch),
                     description=f"Completed {processed_count}/{total_pdfs} ({error_count} errors)",
                 )
+        
+        # End the logging session and get summary
+        if ingestion_logger:
+            summary = ingestion_logger.end_session()
+            
+            # Print a summary of the ingestion process
+            console.print(f"[bold blue]Ingestion Summary:[/bold blue]")
+            console.print(f"Documents processed: {summary['processed_documents']}/{summary['total_documents']}")
+            console.print(f"Pages processed: {summary['total_pages']}")
+            console.print(f"Chunks created: {summary['total_chunks']}")
+            console.print(f"Processing time: {summary['duration_seconds']:.1f} seconds")
+            console.print(f"Average chunks per page: {summary['avg_chunks_per_page']:.1f}")
+            
+            # Print classification distribution
+            if summary['classification_distribution']:
+                console.print("[bold blue]Document Classification Distribution:[/bold blue]")
+                for doc_type, count in sorted(summary['classification_distribution'].items(), key=lambda x: x[1], reverse=True):
+                    console.print(f"  {doc_type}: {count}")
+            
+            # Print error summary if any
+            if summary['error_types']:
+                console.print("[bold red]Error Summary:[/bold red]")
+                for error_type, count in sorted(summary['error_types'].items(), key=lambda x: x[1], reverse=True):
+                    console.print(f"  {error_type}: {count}")
+                    
+            console.print(f"[bold green]Detailed ingestion log saved to: {ingestion_logger.log_file}")
     
         # Final status
         if error_count > 0:

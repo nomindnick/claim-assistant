@@ -31,6 +31,10 @@ app = typer.Typer(
     add_completion=False,
 )
 
+# Create a logs subcommand
+logs_app = typer.Typer(help="Manage and analyze ingestion logs")
+app.add_typer(logs_app, name="logs")
+
 
 @app.command("ingest")
 def ingest_command(
@@ -69,6 +73,10 @@ def ingest_command(
     adaptive_chunking: bool = typer.Option(
         None, "--adaptive-chunking/--no-adaptive-chunking", 
         help="Automatically detect document structure and choose optimal chunking method"
+    ),
+    logging: bool = typer.Option(
+        True, "--logging/--no-logging", 
+        help="Enable detailed ingestion logging"
     ),
 ) -> None:
     """Ingest PDF files into the claim assistant database."""
@@ -131,6 +139,7 @@ def ingest_command(
             batch_size=batch_size,
             resume_on_error=resume,
             matter_name=matter,  # Pass matter name
+            enable_logging=logging,  # Pass logging flag
         )
     except Exception as e:
         console.print(f"[bold red]Error: {str(e)}")
@@ -292,11 +301,48 @@ def clear_command(
         try:
             db_path = Path(config.paths.INDEX_DIR) / "catalog.db"
             if db_path.exists():
+                # Check if current matter exists before deleting
+                current_matter = get_current_matter()
+                
+                # Delete database file
                 db_path.unlink()
                 console.print(f"[bold green]Database cleared: {db_path}")
+                
+                # Re-initialize database after deletion
+                init_database()
+                console.print("[bold green]Database schema re-initialized")
+                
+                # Also clear all resume log files to force reprocessing of PDFs
+                # Clear main resume log
+                resume_log_path = Path(config.paths.DATA_DIR) / "ingest_resume.log"
+                if resume_log_path.exists():
+                    resume_log_path.unlink()
+                    console.print(f"[bold green]Resume log cleared: {resume_log_path}")
+                
+                # Also look for matter-specific logs in matter directories
+                try:
+                    matter_dirs = Path("./matters").glob("*")
+                    for matter_dir in matter_dirs:
+                        if matter_dir.is_dir():
+                            matter_resume_log = matter_dir / "data" / "ingest_resume.log"
+                            if matter_resume_log.exists():
+                                matter_resume_log.unlink()
+                                console.print(f"[bold green]Matter resume log cleared: {matter_resume_log}")
+                except Exception as e:
+                    console.print(f"[bold yellow]Note: Error clearing matter resume logs: {e}")
+                
+                # Reset current matter in config since it no longer exists
+                if current_matter:
+                    from .config import set_current_matter
+                    set_current_matter("")
+                    console.print(f"[bold yellow]Active matter '{current_matter}' was cleared. No active matter.")
+                
                 deleted_count += 1
             else:
                 console.print(f"[bold yellow]Database not found: {db_path}")
+                # Initialize the database if it doesn't exist
+                init_database()
+                console.print("[bold green]Database schema initialized")
         except Exception as e:
             console.print(f"[bold red]Error clearing database: {str(e)}")
 
@@ -397,6 +443,7 @@ def clear_command(
     # Clear resume log
     if resume_log:
         try:
+            # Clear global resume log
             resume_log_path = Path(config.paths.DATA_DIR) / "ingest_resume.log"
             if resume_log_path.exists():
                 resume_log_path.unlink()
@@ -404,6 +451,20 @@ def clear_command(
                 deleted_count += 1
             else:
                 console.print(f"[bold yellow]Resume log not found: {resume_log_path}")
+                
+            # Also clear matter-specific resume logs
+            from .database import get_session, Matter
+            try:
+                with get_session() as session:
+                    matters = session.query(Matter).all()
+                    for matter in matters:
+                        matter_resume_log = Path(matter.data_directory) / "ingest_resume.log"
+                        if matter_resume_log.exists():
+                            matter_resume_log.unlink()
+                            console.print(f"[bold green]Matter resume log cleared: {matter_resume_log}")
+                            deleted_count += 1
+            except Exception as matter_error:
+                console.print(f"[bold yellow]Note: Could not clear matter resume logs: {matter_error}")
         except Exception as e:
             console.print(f"[bold red]Error clearing resume log: {str(e)}")
 
@@ -603,13 +664,23 @@ def delete_matter(name: str) -> None:
     if not name:
         console.print("[bold red]Error: Matter name is required")
         raise typer.Exit(1)
-        
+    
     # Check if this is the active matter
     current_matter = get_current_matter()
     if current_matter == name:
-        console.print("[bold red]Cannot delete the active matter")
-        console.print("Please switch to a different matter first")
-        raise typer.Exit(1)
+        # Check if this is the only matter
+        with get_session() as session:
+            matters_count = session.query(Matter).count()
+            
+        if matters_count <= 1:
+            console.print("[bold red]Cannot delete the only matter")
+            console.print("Please create another matter first with 'matter create <n>'")
+            console.print("Then switch to that matter before deleting this one")
+            raise typer.Exit(1)
+        else:
+            console.print("[bold red]Cannot delete the active matter")
+            console.print("Please switch to a different matter first")
+            raise typer.Exit(1)
         
     # Confirm deletion
     confirm = typer.confirm(f"Are you sure you want to delete matter '{name}'? This will remove all data.", default=False)
@@ -664,6 +735,160 @@ def delete_matter(name: str) -> None:
 def version_command() -> None:
     """Show version information."""
     console.print(f"claim-assistant v{__version__}")
+
+
+@logs_app.command("list")
+def logs_list_command(
+    matter: Optional[str] = typer.Option(
+        None, "--matter", "-m", help="Matter name to list logs for"
+    ),
+    limit: int = typer.Option(
+        5, "--limit", "-l", help="Maximum number of logs to list"
+    ),
+) -> None:
+    """List recent ingestion logs for a matter."""
+    # Use current matter if not specified
+    if not matter:
+        matter = get_current_matter()
+        if not matter:
+            console.print("[bold yellow]No active matter. Use 'matter switch' or specify --matter")
+            raise typer.Exit(1)
+    
+    # Get matter directory
+    matter_dir = get_matter_path(matter)
+    if not matter_dir:
+        console.print(f"[bold red]Matter '{matter}' not found")
+        raise typer.Exit(1)
+    
+    # Import here to avoid circular imports
+    from .ingestion_logger import get_recent_logs
+    
+    # Get recent logs
+    logs = get_recent_logs(matter_dir, limit)
+    
+    if not logs:
+        console.print(f"[bold yellow]No ingestion logs found for matter '{matter}'")
+        return
+    
+    # Create a table to display logs
+    table = Table(title=f"Recent Ingestion Logs for '{matter}'")
+    table.add_column("Date", style="cyan")
+    table.add_column("Time", style="cyan")
+    table.add_column("Log File", style="green")
+    table.add_column("Size", justify="right", style="blue")
+    
+    for log_file in logs:
+        # Extract timestamp from filename (format: ingestion_YYYYMMDD_HHMMSS.jsonl)
+        filename = log_file.name
+        if filename.startswith("ingestion_") and "_" in filename:
+            timestamp = filename.split("_")[1]
+            date = f"{timestamp[:4]}-{timestamp[4:6]}-{timestamp[6:8]}"
+            time_str = f"{timestamp[9:11]}:{timestamp[11:13]}:{timestamp[13:15]}"
+        else:
+            # Use file modification time if filename doesn't contain timestamp
+            mtime = log_file.stat().st_mtime
+            dt = datetime.fromtimestamp(mtime)
+            date = dt.strftime("%Y-%m-%d")
+            time_str = dt.strftime("%H:%M:%S")
+        
+        # Get file size in KB
+        size_kb = log_file.stat().st_size / 1024
+        
+        table.add_row(
+            date,
+            time_str,
+            log_file.name,
+            f"{size_kb:.1f} KB"
+        )
+    
+    console.print(table)
+
+
+@logs_app.command("show")
+def logs_show_command(
+    log_file: Optional[str] = typer.Argument(
+        None, help="Log file name to show (if omitted, shows most recent)"
+    ),
+    matter: Optional[str] = typer.Option(
+        None, "--matter", "-m", help="Matter name the log belongs to"
+    ),
+) -> None:
+    """Show summary of an ingestion log file."""
+    # Use current matter if not specified
+    if not matter:
+        matter = get_current_matter()
+        if not matter:
+            console.print("[bold yellow]No active matter. Use 'matter switch' or specify --matter")
+            raise typer.Exit(1)
+    
+    # Get matter directory
+    matter_dir = get_matter_path(matter)
+    if not matter_dir:
+        console.print(f"[bold red]Matter '{matter}' not found")
+        raise typer.Exit(1)
+    
+    # Import here to avoid circular imports
+    from .ingestion_logger import get_recent_logs, analyze_log_file
+    
+    # Get log file path
+    log_path = None
+    if log_file:
+        # Use specified log file
+        log_path = matter_dir / "logs" / log_file
+        if not log_path.exists():
+            console.print(f"[bold red]Log file '{log_file}' not found for matter '{matter}'")
+            raise typer.Exit(1)
+    else:
+        # Use most recent log file
+        recent_logs = get_recent_logs(matter_dir, 1)
+        if not recent_logs:
+            console.print(f"[bold yellow]No ingestion logs found for matter '{matter}'")
+            raise typer.Exit(1)
+        log_path = recent_logs[0]
+    
+    try:
+        # Analyze log file
+        summary = analyze_log_file(log_path)
+        
+        # Display summary
+        console.print(f"[bold blue]Ingestion Log Summary: {log_path.name}[/bold blue]")
+        console.print(f"Matter: [cyan]{matter}[/cyan]")
+        
+        if "start_time" in summary and summary["start_time"]:
+            console.print(f"Start time: {summary['start_time']}")
+        if "end_time" in summary and summary["end_time"]:
+            console.print(f"End time: {summary['end_time']}")
+        
+        console.print(f"Documents processed: {summary.get('processed_documents', 0)}/{summary.get('total_documents', 0)}")
+        
+        if "total_pages" in summary:
+            console.print(f"Pages processed: {summary['total_pages']}")
+        if "total_chunks" in summary:
+            console.print(f"Chunks created: {summary['total_chunks']}")
+        if "duration_seconds" in summary:
+            console.print(f"Processing time: {summary['duration_seconds']:.1f} seconds")
+        if "avg_chunks_per_page" in summary:
+            console.print(f"Average chunks per page: {summary['avg_chunks_per_page']:.1f}")
+        
+        # Print classification distribution
+        if "classification_distribution" in summary and summary["classification_distribution"]:
+            console.print("[bold blue]Document Classification Distribution:[/bold blue]")
+            for doc_type, count in sorted(summary["classification_distribution"].items(), key=lambda x: x[1], reverse=True):
+                console.print(f"  {doc_type}: {count}")
+        
+        # Print error summary if any
+        if "error_types" in summary and summary["error_types"]:
+            console.print("[bold red]Error Summary:[/bold red]")
+            for error_type, count in sorted(summary["error_types"].items(), key=lambda x: x[1], reverse=True):
+                console.print(f"  {error_type}: {count}")
+            
+            # Print error rate
+            if "error_rate" in summary:
+                console.print(f"Error rate: {summary['error_rate']:.1f}%")
+        
+    except Exception as e:
+        console.print(f"[bold red]Error analyzing log file: {str(e)}")
+        raise typer.Exit(1)
 
 
 # Ensure database is initialized when module is loaded

@@ -20,6 +20,7 @@ Construction Claim Assistant is designed to help construction professionals, att
 - **Matter Management**: Work on multiple legal matters simultaneously with isolated document storage
 - **Interactive Shell**: Command-line shell with history, auto-completion, and contextual help
 - **Chunk Visualization**: Tools to visualize and compare different document chunking methods
+- **Ingestion Logging**: Detailed metrics and statistics about document processing and classification
 - **Low Resource Usage**: Works efficiently on standard laptops (≤3GB RAM)
 
 ## Installation
@@ -243,10 +244,12 @@ claim-assistant/
 ├── matters/            # Matter-specific data
 │   ├── Matter1/        # Data for a specific matter
 │   │   ├── data/       # Matter-specific data storage
-│   │   └── index/      # Matter-specific index
+│   │   ├── index/      # Matter-specific index
+│   │   └── logs/       # Ingestion logs for this matter
 │   └── Matter2/        # Another matter
 │       ├── data/
-│       └── index/
+│       ├── index/
+│       └── logs/
 │
 ├── exhibits/           # Exported page images
 │
@@ -255,6 +258,7 @@ claim-assistant/
 │   ├── query.py        # Question answering
 │   ├── config.py       # Configuration management
 │   ├── semantic_chunking.py # Advanced chunking functionality
+│   ├── ingestion_logger.py # Logging and metrics for ingestion
 │   └── utils.py        # Utility functions
 │
 ├── test_chunking.py    # Chunking visualization tool
