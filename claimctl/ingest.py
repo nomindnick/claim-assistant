@@ -3,6 +3,7 @@
 import os
 import re
 import math
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -25,7 +26,7 @@ from .database import (
     save_faiss_id_mapping,
     save_page_chunk,
 )
-from .semantic_chunking import create_semantic_chunks, create_hierarchical_chunks, fallback_chunk_text
+from .semantic_chunking import create_semantic_chunks, create_hierarchical_chunks, fallback_chunk_text, create_adaptive_chunks
 from .utils import (
     calculate_sha256,
     console,
