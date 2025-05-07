@@ -199,7 +199,13 @@ class ClaimAssistantShell:
 
         if command == "ask" and rest:
             # Join the rest as a single question string
-            return [command, " ".join(rest)]
+            question = " ".join(rest)
+            
+            # For ask command, always include the question and additional parameters
+            formatted_args = [command, question]
+            
+            # Debug: The top_k parameter will be added later
+            return formatted_args
 
         return [command] + rest
 
@@ -287,6 +293,15 @@ class ClaimAssistantShell:
 
         # Format arguments for Typer
         typer_args = self._format_typer_args([command] + args)
+        
+        # Debug the command being run
+        if command == "ask":
+            console.log(f"Interactive: Running 'ask' command with args: {typer_args[1:]}")
+            # Add --top-k 25 if not already specified
+            if not any(arg.startswith("--top-k") or arg == "-k" for arg in typer_args):
+                typer_args.append("--top-k")
+                typer_args.append("25")
+                console.log(f"Interactive: Added explicit --top-k 25 parameter: {typer_args}")
 
         # Run command through Typer
         try:

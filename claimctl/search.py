@@ -177,6 +177,7 @@ def hybrid_search(
         return [], []
 
     # Extract text for BM25 search
+    console.log(f"Retrieved {len(initial_chunks)} initial chunks for processing")
     corpus = [chunk["text"] for chunk in initial_chunks]
     faiss_ids = [chunk.get("faiss_id") for chunk in initial_chunks]
 
@@ -237,14 +238,16 @@ def hybrid_search(
     config = get_config()
     
     # Default number of documents to pass to the LLM
-    llm_document_count = 25
+    llm_document_count = 50
     
     # Add reranking step here, but only if enabled
     if config.retrieval.RERANK_ENABLED:
+        console.log(f"Sending {len(result_chunks)} chunks to reranker with llm_document_count={llm_document_count}")
         return rerank_with_cross_encoder(query, result_chunks, result_scores, 
                                          llm_document_count=llm_document_count)
     else:
         # If not reranking, still limit to llm_document_count
+        console.log(f"No reranking, limiting to {llm_document_count} documents")
         return result_chunks[:llm_document_count], result_scores[:llm_document_count]
 
 
@@ -271,6 +274,7 @@ def search_documents(
 
     # Choose search method based on search_type
     if search_type == "hybrid":
+        console.log(f"Starting hybrid search with top_k={top_k}")
         return hybrid_search(query, top_k, metadata_filters, config.bm25.WEIGHT)
     elif search_type == "keyword":
         # Pure keyword search using BM25
@@ -292,7 +296,7 @@ def search_documents(
         result_scores = [score for _, score in keyword_results]
 
         # Default number of documents to pass to the LLM
-        llm_document_count = 25
+        llm_document_count = 50
         
         # Apply reranking if enabled
         if config.retrieval.RERANK_ENABLED:
@@ -350,8 +354,8 @@ def search_documents(
                 filtered_indices = []
                 filtered_scores = []
 
-            # Apply metadata filtering if provided
-            chunks = get_top_chunks_by_similarity(filtered_indices, top_k)
+            # Apply metadata filtering if provided - get double top_k for reranking
+            chunks = get_top_chunks_by_similarity(filtered_indices, top_k=top_k*2)
 
             if metadata_filters and chunks:
                 filtered_chunks = []
@@ -423,7 +427,7 @@ def search_documents(
                 filtered_scores = [1.0] * len(chunks)
             
             # Default number of documents to pass to the LLM
-            llm_document_count = 25
+            llm_document_count = 50
             
             # Apply reranking if enabled
             if config.retrieval.RERANK_ENABLED and chunks:

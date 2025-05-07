@@ -200,6 +200,7 @@ def ask_command(
             console.print("[bold yellow]No active matter. Use 'matter switch' or specify --matter")
             raise typer.Exit(1)
     try:
+        console.log(f"CLI: Calling query_documents with top_k={top_k}")
         query_documents(
             question,
             top_k,

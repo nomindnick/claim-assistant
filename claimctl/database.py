@@ -374,10 +374,15 @@ def get_top_chunks_by_similarity(
 ) -> List[Dict[str, Any]]:
     """Get the top chunks by similarity score."""
     from .utils import console
+    console.log(f"get_top_chunks_by_similarity called with {len(vector_ids)} vector IDs and top_k={top_k}")
 
     if not top_k:
         config = get_config()
         top_k = config.retrieval.TOP_K
+    
+    # Always use twice the requested top_k to ensure enough documents for reranking
+    top_k = top_k * 2
+    console.log(f"Will retrieve up to {top_k} chunks from database")
 
     # Handle empty vector_ids case
     if not vector_ids:
@@ -446,11 +451,11 @@ def get_top_chunks_by_similarity(
                 return []
 
     # Normal processing for non-empty vector_ids
-    console.log(f"Looking up chunks for vector_ids: {vector_ids[:top_k]}")
+    console.log(f"Looking up chunks for vector_ids: {vector_ids[:top_k*2]}")  # Use double the top_k to ensure we have enough for reranking
 
     with get_session() as session:
         chunks = []
-        for faiss_id in vector_ids[:top_k]:
+        for faiss_id in vector_ids[:top_k*2]:  # Double top_k to get enough chunks for reranking
             # Look up by faiss_id directly
             chunk = (
                 session.query(PageChunk).filter(PageChunk.faiss_id == faiss_id).first()
