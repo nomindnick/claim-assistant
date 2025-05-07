@@ -107,7 +107,7 @@ def load_config() -> configparser.ConfigParser:
         "EMBED_MODEL": "text-embedding-3-large",
     }
     config["retrieval"] = {
-        "TOP_K": "6",
+        "TOP_K": "20",
         "SCORE_THRESHOLD": "0.6",
         "CONTEXT_SIZE": "2000",
         "ANSWER_CONFIDENCE": "True",

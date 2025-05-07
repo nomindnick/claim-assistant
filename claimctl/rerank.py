@@ -10,7 +10,8 @@ def rerank_with_cross_encoder(
     query: str, 
     chunks: List[Dict[str, Any]], 
     scores: List[float],
-    top_k: Optional[int] = None
+    top_k: Optional[int] = None,
+    llm_document_count: int = 25
 ) -> Tuple[List[Dict[str, Any]], List[float]]:
     """Rerank search results using a cross-encoder model.
     
@@ -19,6 +20,7 @@ def rerank_with_cross_encoder(
         chunks: List of document chunks from initial retrieval
         scores: Initial relevance scores
         top_k: Number of results to return after reranking
+        llm_document_count: Number of documents to pass to the LLM (default 25)
         
     Returns:
         Tuple of (reranked_chunks, reranked_scores)
@@ -28,6 +30,9 @@ def rerank_with_cross_encoder(
         
     if top_k is None:
         top_k = len(chunks)
+    
+    # Use llm_document_count for number of documents to return
+    top_k = min(llm_document_count, len(chunks))
     
     try:
         # Import here to avoid dependencies if not used

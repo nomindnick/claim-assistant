@@ -97,14 +97,14 @@ Once your documents are ingested, you can ask natural language questions:
 ```bash
 python -m claimctl.cli ask "Where is Change Order 12 justified?"
 
-# Specify the number of documents to use (default is 6)
-python -m claimctl.cli ask "Where is Change Order 12 justified?" --top-k 10
+# Specify the number of documents to use (default is 20)
+python -m claimctl.cli ask "Where is Change Order 12 justified?" --top-k 30
 # or using the shorter flag
 python -m claimctl.cli ask "Where is Change Order 12 justified?" -k 10
 ```
 
 The system will:
-1. Find relevant documents based on semantic similarity (by default, the top 6 documents)
+1. Find relevant documents based on semantic similarity (by default, the top 25 documents)
 2. Rerank results using a cross-encoder model for more accurate relevance scoring
 3. Extract and analyze metadata from documents (amounts, time periods, section references, etc.)
 4. Generate a comprehensive answer using GPT-4o-mini
@@ -342,7 +342,7 @@ You can edit `~/.claimctl.ini` to change:
 - Data storage locations (DATA_DIR, INDEX_DIR)
 - OpenAI model selection (MODEL, EMBED_MODEL)
 - Retrieval parameters:
-  - TOP_K: Number of documents to retrieve (default is 6)
+  - TOP_K: Number of documents to retrieve (default is 20, which pulls ~200 initial candidates)
   - SCORE_THRESHOLD: Minimum similarity score for documents
   - CONTEXT_SIZE: Character limit per chunk for context window
   - ANSWER_CONFIDENCE: Whether to include confidence indicators

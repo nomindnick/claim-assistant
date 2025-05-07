@@ -236,11 +236,16 @@ def hybrid_search(
     # Get config
     config = get_config()
     
+    # Default number of documents to pass to the LLM
+    llm_document_count = 25
+    
     # Add reranking step here, but only if enabled
     if config.retrieval.RERANK_ENABLED:
-        return rerank_with_cross_encoder(query, result_chunks, result_scores)
+        return rerank_with_cross_encoder(query, result_chunks, result_scores, 
+                                         llm_document_count=llm_document_count)
     else:
-        return result_chunks, result_scores
+        # If not reranking, still limit to llm_document_count
+        return result_chunks[:llm_document_count], result_scores[:llm_document_count]
 
 
 def search_documents(
@@ -286,11 +291,16 @@ def search_documents(
         result_chunks = [chunks[idx] for idx, _ in keyword_results]
         result_scores = [score for _, score in keyword_results]
 
+        # Default number of documents to pass to the LLM
+        llm_document_count = 25
+        
         # Apply reranking if enabled
         if config.retrieval.RERANK_ENABLED:
-            return rerank_with_cross_encoder(query, result_chunks, result_scores)
+            return rerank_with_cross_encoder(query, result_chunks, result_scores, 
+                                            llm_document_count=llm_document_count)
         else:
-            return result_chunks, result_scores
+            # If not reranking, still limit to llm_document_count
+            return result_chunks[:llm_document_count], result_scores[:llm_document_count]
     else:  # vector search (default fallback)
         from .ingest import create_or_load_faiss_index, get_embeddings
 
@@ -412,11 +422,16 @@ def search_documents(
             if chunks and not filtered_scores:
                 filtered_scores = [1.0] * len(chunks)
             
+            # Default number of documents to pass to the LLM
+            llm_document_count = 25
+            
             # Apply reranking if enabled
             if config.retrieval.RERANK_ENABLED and chunks:
-                return rerank_with_cross_encoder(query, chunks, filtered_scores)
+                return rerank_with_cross_encoder(query, chunks, filtered_scores, 
+                                                llm_document_count=llm_document_count)
             else:
-                return chunks, filtered_scores
+                # If not reranking, still limit to llm_document_count
+                return chunks[:llm_document_count], filtered_scores[:llm_document_count]
 
         except Exception as e:
             console.log(f"[bold red]Error in search: {str(e)}")

@@ -44,3 +44,35 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Use `--matter` flag when ingesting or querying specific matters
 - Configure matter-specific paths in `config.py`
 - Document relationships include matter_id for isolation between matters
+
+## Key Components
+
+### Document Ingestion
+- Processing happens in `claimctl/ingest.py`
+- Ingestion pipeline: PDF extraction → OCR → chunking → classification → embedding
+- Advanced semantic chunking is implemented in `claimctl/semantic_chunking.py`
+- Document classification uses OpenAI models to categorize documents (Email, ChangeOrder, etc.)
+- Detailed metrics logging is handled by `claimctl/ingestion_logger.py`
+
+### Search and Retrieval
+- Hybrid search combines vector search and BM25 keyword search
+- Initial search retrieves TOP_K * 10 candidates (200 by default)
+- Cross-encoder reranking improves search precision
+- Top 25 documents passed to the LLM for comprehensive analysis
+- Search configuration is handled in the INI file (TOP_K, SCORE_THRESHOLD, etc.)
+
+### Model Usage
+- Main completion model (`gpt-4o-mini` by default): Answers questions
+- Embedding model (`text-embedding-3-large` by default): Generates vector embeddings
+- Models can be configured in `~/.claimctl.ini`
+
+## Database Structure
+- SQLite database stores documents, pages, chunks, and matter metadata
+- FAISS vector index stores embeddings for semantic search
+- Each matter has isolated data and index directories
+
+## Recent Features
+- Advanced semantic chunking for construction documents
+- Detailed ingestion logging system
+- Enhanced metadata extraction
+- Cross-encoder reranking for improved search precision

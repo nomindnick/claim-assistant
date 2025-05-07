@@ -97,6 +97,9 @@ def search_documents(
     if not top_k:
         top_k = config.retrieval.TOP_K
         
+    # Number of documents to pass to the LLM
+    llm_document_count = 25  # Pass top 25 documents to the LLM
+        
     # Handle matter-specific search
     from .config import get_current_matter
     from .database import get_session, Matter
