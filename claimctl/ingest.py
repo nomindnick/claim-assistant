@@ -324,7 +324,7 @@ def classify_chunk(text: str) -> Tuple[str, int]:
     try:
         client = OpenAI(api_key=config.openai.API_KEY)
         response = client.chat.completions.create(
-            model=config.openai.MODEL,
+            model="gpt-4.1-mini",
             messages=[
                 {
                     "role": "system",
@@ -335,7 +335,6 @@ def classify_chunk(text: str) -> Tuple[str, int]:
                     "content": CHUNK_TYPE_PROMPT.format(text=text[:1000]),
                 },  # Truncate text
             ],
-            temperature=0.0,
             max_tokens=50,
         )
 

@@ -98,7 +98,7 @@ def search_documents(
         top_k = config.retrieval.TOP_K
         
     # Number of documents to pass to the LLM
-    llm_document_count = 25  # Pass top 25 documents to the LLM
+    llm_document_count = 50  # Pass top 50 documents to the LLM
         
     # Handle matter-specific search
     from .config import get_current_matter
@@ -228,10 +228,11 @@ def answer_question(
     )
 
     try:
-        # Query OpenAI with expanded system prompt
+        # Query OpenAI with expanded system prompt using the o4-mini reasoning model
         client = OpenAI(api_key=config.openai.API_KEY)
         response = client.chat.completions.create(
-            model=config.openai.MODEL,
+            model="o4-mini-2025-04-16",
+            reasoning_effort="high",
             messages=[
                 {
                     "role": "system",
@@ -247,7 +248,6 @@ Key characteristics of your responses:
                 },
                 {"role": "user", "content": prompt},
             ],
-            temperature=0.0,
         )
 
         return response.choices[0].message.content
@@ -509,10 +509,11 @@ def handle_user_commands(
                     # Get config
                     config = get_config()
 
-                    # Query GPT-4o-mini
+                    # Query o4-mini with reasoning for document comparison
                     client = OpenAI(api_key=config.openai.API_KEY)
                     response = client.chat.completions.create(
-                        model=config.openai.MODEL,
+                        model="o4-mini-2025-04-16",
+                        reasoning_effort="high",
                         messages=[
                             {
                                 "role": "system",
@@ -520,7 +521,6 @@ def handle_user_commands(
                             },
                             {"role": "user", "content": comparison_prompt},
                         ],
-                        temperature=0.0,
                     )
 
                     comparison = response.choices[0].message.content

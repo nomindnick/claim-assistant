@@ -254,7 +254,7 @@ def ai_detect_document_structure(text_sample: str) -> str:
     try:
         client = OpenAI(api_key=config.openai.API_KEY)
         response = client.chat.completions.create(
-            model=config.openai.MODEL,
+            model="gpt-4.1-mini",
             messages=[
                 {
                     "role": "system",
@@ -265,7 +265,6 @@ def ai_detect_document_structure(text_sample: str) -> str:
                     "content": structure_prompt.format(text=text_sample[:1000]),  # Use first 1000 chars
                 },
             ],
-            temperature=0.0,
             max_tokens=10,
         )
         
