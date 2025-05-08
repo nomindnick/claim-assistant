@@ -21,6 +21,10 @@ Construction Claim Assistant is designed to help construction professionals, att
 - **Interactive Shell**: Command-line shell with history, auto-completion, and contextual help
 - **Chunk Visualization**: Tools to visualize and compare different document chunking methods
 - **Ingestion Logging**: Detailed metrics and statistics about document processing and classification
+- **Timeline Generation**: Automatically extracts events to create a claim chronology with visual display
+- **Financial Impact Tracking**: Monitors monetary changes across change orders, payments, and claims
+- **Contradiction Detection**: Identifies conflicting information between different project documents
+- **Timeline Export**: Exports comprehensive timelines as PDFs with financial analysis
 - **Low Resource Usage**: Works efficiently on standard laptops (≤3GB RAM)
 
 ## Installation
@@ -253,12 +257,16 @@ claim-assistant/
 │
 ├── exhibits/           # Exported page images
 │
+├── Timeline_Exports/   # Exported timeline PDFs
+│
 ├── claimctl/           # Python package
 │   ├── ingest.py       # PDF processing 
 │   ├── query.py        # Question answering
 │   ├── config.py       # Configuration management
 │   ├── semantic_chunking.py # Advanced chunking functionality
 │   ├── ingestion_logger.py # Logging and metrics for ingestion
+│   ├── timeline.py     # Timeline extraction and management
+│   ├── rerank.py       # Cross-encoder reranking functionality
 │   └── utils.py        # Utility functions
 │
 ├── test_chunking.py    # Chunking visualization tool

@@ -105,3 +105,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Detailed ingestion logging system
 - Enhanced metadata extraction
 - Cross-encoder reranking for improved search precision
+- Timeline generation and visualization
+- Financial impact tracking and analysis
+- Contradiction detection in timeline events
+- Timeline PDF export functionality

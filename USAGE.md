@@ -44,6 +44,16 @@ The interactive shell provides a more user-friendly way to interact with the app
    - Help is available by typing `help`
    - Exit with `exit` or `quit`
 
+## Key Features
+
+The application provides several powerful capabilities for construction claim analysis:
+
+1. **Document Ingestion and Analysis**: Efficiently process, classify, and extract information from PDF documents
+2. **Natural Language Querying**: Ask questions in plain English about your construction project
+3. **Timeline Generation**: Extract and visualize chronological events from your documents
+4. **Financial Impact Analysis**: Track monetary changes throughout your project timeline
+5. **Contradiction Detection**: Identify conflicting information between documents
+
 ## Working with Documents
 
 ### Ingesting PDFs
@@ -410,6 +420,95 @@ python -m claimctl.cli clear --resume-log  # Clear the ingestion resume log
 
 The clear command will ask for confirmation before deleting any data and will provide a report of what was cleared.
 
+### Working with Timelines
+
+The system can extract timeline events from your documents and create comprehensive claim chronologies:
+
+```bash
+# Extract timeline events from all documents in the current matter
+python -m claimctl.cli timeline extract
+
+# Show the timeline for the current matter
+python -m claimctl.cli timeline show
+
+# Show timeline with specific parameters
+python -m claimctl.cli timeline show --from "2024-01-01" --to "2024-05-31" --type change_order --min-importance 0.4
+
+# Export timeline as PDF
+python -m claimctl.cli timeline export --open  # Add --open to automatically open the PDF
+
+# Show financial summary
+python -m claimctl.cli timeline financials summary
+
+# Show available event types
+python -m claimctl.cli timeline types
+
+# Detect contradictions between timeline events
+python -m claimctl.cli timeline contradictions detect
+```
+
+#### Timeline Event Types
+
+The system supports various event types including:
+- `project_start`: Project commencement events
+- `project_completion`: Project completion milestones
+- `change_order`: Contract modifications and change orders
+- `delay`: Schedule impacts and delay events
+- `payment`: Payment transactions and invoices
+- `notice`: Formal notices between parties
+- `claim`: Claim submissions and responses
+- `dispute`: Disputed matters and resolutions
+- `agreement`: Contract and agreement events
+- `correspondence`: Important correspondence between parties
+- `meeting`: Meeting minutes and discussions
+- `request_for_information`: RFIs and responses
+- `other`: Miscellaneous events
+
+#### Timeline Display Formats
+
+You can display timelines in different formats:
+
+```bash
+# Show timeline in table format (default)
+python -m claimctl.cli timeline show --format table
+
+# Show timeline in text format with chronological grouping
+python -m claimctl.cli timeline show --format text
+```
+
+#### Financial Impact Analysis
+
+The system tracks financial impacts across various event types:
+
+```bash
+# Show financial summary for all events
+python -m claimctl.cli timeline financials summary
+
+# Show financial summary for specific event types
+python -m claimctl.cli timeline financials summary --type change_order --type claim
+
+# Show financial summary for a date range
+python -m claimctl.cli timeline financials summary --from "2024-01-01" --to "2024-05-31"
+
+# Update running financial totals (recalculate chronological running sums)
+python -m claimctl.cli timeline financials update-totals
+```
+
+#### Contradiction Detection
+
+The system can identify contradictions between events in your timeline:
+
+```bash
+# Detect contradictions with default settings
+python -m claimctl.cli timeline contradictions detect
+
+# Detect contradictions with specific parameters
+python -m claimctl.cli timeline contradictions detect --min-confidence 0.7 --max-days 45
+
+# Manually mark a contradiction between two events
+python -m claimctl.cli timeline contradictions mark 123 456 "Events describe conflicting completion dates"
+```
+
 ## Example Workflows
 
 ### Using Direct CLI Commands
@@ -427,6 +526,18 @@ python -m claimctl.cli ingest ~/test-pdfs/*.pdf
 
 # Ask a question with default settings (retrieves top 6 documents)
 python -m claimctl.cli ask "Where is Change Order 12 justified?"
+
+# Extract timeline events from all documents
+python -m claimctl.cli timeline extract
+
+# View the timeline
+python -m claimctl.cli timeline show
+
+# Show financial impact summary
+python -m claimctl.cli timeline financials summary
+
+# Export timeline as PDF
+python -m claimctl.cli timeline export --open
 
 # Create another matter and switch to it
 python -m claimctl.cli matter create "Office Building Project"
@@ -483,6 +594,16 @@ logs show
 
 # Ask a question
 ask Where is Change Order 12 justified?
+
+# Extract and view timeline
+timeline extract
+timeline show
+
+# View financial summary
+timeline financials summary
+
+# Export timeline as PDF
+timeline export --open
 
 # Create another matter and switch to it
 matter create "Office Building Project"
