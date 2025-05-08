@@ -822,16 +822,65 @@ def display_timeline(timeline_data: Dict[str, Any], format: str = "table") -> No
 def extract_events_from_all_documents(
     matter_id: int,
     progress: Optional[Progress] = None,
+    resume: bool = True,
+    force: bool = False,
 ) -> int:
     """Extract timeline events from all documents in a matter.
     
     Args:
         matter_id: ID of the matter
         progress: Optional progress bar
+        resume: Whether to resume from where the previous extraction left off
+        force: Whether to force re-extraction of all events (ignores resume)
         
     Returns:
         Number of events extracted
     """
+    # Get the matter info for the resume log
+    with get_session() as session:
+        matter = session.query(Matter).filter(Matter.id == matter_id).first()
+        if not matter:
+            console.log("[bold red]Matter not found")
+            return 0
+            
+        matter_name = matter.name
+    
+    # Create resume log path
+    config = get_config()
+    matter_dir = Path(matter.data_directory).parent
+    logs_dir = matter_dir / "logs"
+    logs_dir.mkdir(exist_ok=True, parents=True)
+    resume_log_path = logs_dir / "timeline_extract_resume.log"
+    
+    # Get completed chunk IDs from resume log
+    completed_chunk_ids = set()
+    if resume and resume_log_path.exists() and not force:
+        try:
+            with open(resume_log_path, "r") as f:
+                completed_chunk_ids = set(int(line.strip()) for line in f.readlines() if line.strip().isdigit())
+            console.log(f"[bold yellow]Found {len(completed_chunk_ids)} previously processed chunks")
+        except Exception as e:
+            console.log(f"[bold red]Error reading resume log: {str(e)}")
+    
+    # If forcing re-extraction, clear existing events first
+    if force:
+        console.log("[bold yellow]Force mode enabled, deleting existing timeline events")
+        with get_session() as session:
+            # Get all timeline event IDs for this matter
+            event_ids = [e.id for e in session.query(TimelineEvent.id).filter(TimelineEvent.matter_id == matter_id).all()]
+            
+            # Delete related financial events first (avoid foreign key constraint errors)
+            if event_ids:
+                session.query(FinancialEvent).filter(FinancialEvent.timeline_event_id.in_(event_ids)).delete(synchronize_session=False)
+                session.query(TimelineEvent).filter(TimelineEvent.matter_id == matter_id).delete(synchronize_session=False)
+                session.commit()
+                
+                # Clear resume log if it exists
+                if resume_log_path.exists():
+                    resume_log_path.unlink()
+                
+                console.log(f"[bold green]Deleted existing timeline events for matter '{matter_name}'")
+    
     # Get all chunks for the matter
     with get_session() as session:
         # Get matter documents
@@ -851,6 +900,10 @@ def extract_events_from_all_documents(
                 page_chunks = session.query(PageChunk).filter(PageChunk.page_id == page.id).all()
                 
                 for chunk in page_chunks:
+                    # Skip already processed chunks if resuming and not forcing
+                    if resume and not force and chunk.id in completed_chunk_ids:
+                        continue
+                        
                     chunks.append({
                         "id": chunk.id,
                         "text": chunk.text,
@@ -861,6 +914,14 @@ def extract_events_from_all_documents(
                         "project_name": chunk.project_name,
                         "page_num": page.page_num,
                     })
+    
+    # If all chunks have been processed, we're done
+    if not chunks:
+        if completed_chunk_ids:
+            console.log("[bold green]All chunks have already been processed. Use --force to re-extract all events.")
+        else:
+            console.log("[yellow]No chunks to process")
+        return 0
     
     # Process chunks in batches
     batch_size = 50
@@ -892,6 +953,11 @@ def extract_events_from_all_documents(
             # Process batch
             events = batch_extract_timeline_events(batch, matter_id, progress)
             total_events += len(events)
+            
+            # Update resume log with completed chunk IDs
+            with open(resume_log_path, "a") as f:
+                for chunk in batch:
+                    f.write(f"{chunk['id']}\n")
             
             # Update overall progress
             progress.update(overall_task, advance=len(batch))

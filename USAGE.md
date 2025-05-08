@@ -439,6 +439,15 @@ The system can extract timeline events from your documents and create comprehens
 # Extract timeline events from all documents in the current matter (if not already extracted during ingestion)
 python -m claimctl.cli timeline extract
 
+# Resume an interrupted timeline extraction (default behavior)
+python -m claimctl.cli timeline extract
+
+# Force re-extraction of all timeline events (deletes existing events)
+python -m claimctl.cli timeline extract --force
+
+# Start from the beginning but don't delete existing events
+python -m claimctl.cli timeline extract --no-resume
+
 # Show the timeline for the current matter
 python -m claimctl.cli timeline show
 

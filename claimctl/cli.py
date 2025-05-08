@@ -933,8 +933,19 @@ def timeline_extract_command(
     matter: Optional[str] = typer.Option(
         None, "--matter", "-m", help="Matter name to extract timeline events for"
     ),
+    no_resume: bool = typer.Option(
+        False, "--no-resume", help="Don't resume from previous extraction"
+    ),
+    force: bool = typer.Option(
+        False, "--force", "-f", help="Force re-extraction of all events"
+    ),
 ) -> None:
-    """Extract timeline events from all documents in a matter."""
+    """Extract timeline events from all documents in a matter.
+    
+    By default, the extraction will resume from where it left off if interrupted.
+    Use --no-resume to start from the beginning, ignoring previous progress.
+    Use --force to delete all existing timeline events and start fresh.
+    """
     # Use current matter if not specified
     if not matter:
         matter = get_current_matter()
@@ -951,11 +962,19 @@ def timeline_extract_command(
         
         matter_id = matter_obj.id
     
+    # Show appropriate confirmation message based on options
+    message = f"Extract timeline events from all documents in matter '{matter}'?"
+    if force:
+        message += " (force mode: will delete all existing timeline events)"
+    elif not no_resume:
+        message += " (will resume from previous extraction if interrupted)"
+    else:
+        message += " (will start from the beginning)"
+    
+    message += " This may take some time."
+    
     # Confirm extraction
-    confirm = typer.confirm(
-        f"Extract timeline events from all documents in matter '{matter}'? This may take some time.",
-        default=True,
-    )
+    confirm = typer.confirm(message, default=True)
     if not confirm:
         console.print("[bold yellow]Operation cancelled")
         return
@@ -966,8 +985,21 @@ def timeline_extract_command(
         # Extract events
         try:
             console.print(f"[bold green]Extracting timeline events for matter '{matter}'...")
-            event_count = extract_events_from_all_documents(matter_id, progress)
-            console.print(f"[bold green]Extraction complete. {event_count} events extracted.")
+            event_count = extract_events_from_all_documents(
+                matter_id, 
+                progress,
+                resume=not no_resume,
+                force=force
+            )
+            
+            # Show appropriate completion message
+            if event_count > 0:
+                console.print(f"[bold green]Extraction complete. {event_count} events extracted.")
+            else:
+                if force:
+                    console.print("[bold yellow]No events were extracted. Check if there are documents in this matter.")
+                else:
+                    console.print("[bold green]No new events to extract. Use --force to re-extract all events.")
         except Exception as e:
             console.print(f"[bold red]Error extracting timeline events: {str(e)}")
             raise typer.Exit(1)

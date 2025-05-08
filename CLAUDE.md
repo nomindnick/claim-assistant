@@ -114,3 +114,5 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Financial impact tracking and analysis
 - Contradiction detection in timeline events
 - Timeline PDF export functionality
+- Resumable timeline extraction with duplicate prevention
+- Force re-extraction option for timeline events

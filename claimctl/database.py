@@ -502,7 +502,20 @@ def save_timeline_event(event_data: Dict[str, Any]) -> Optional[int]:
             # Start transaction
             transaction = session.begin_nested()
             
-            # Create new timeline event
+            # Check for duplicate timeline events based on chunk_id to prevent duplicates
+            # This is an additional safeguard for the case when resume log might be incomplete
+            existing_event = None
+            if 'chunk_id' in event_data:
+                existing_event = session.query(TimelineEvent).filter(
+                    TimelineEvent.chunk_id == event_data['chunk_id'],
+                    TimelineEvent.matter_id == event_data['matter_id']
+                ).first()
+                
+            # If duplicate found, just return its ID
+            if existing_event:
+                return existing_event.id
+                
+            # If no duplicate, create new timeline event
             event = TimelineEvent(**event_data)
             session.add(event)
             session.flush()  # To get the ID
