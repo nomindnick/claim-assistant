@@ -68,6 +68,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Initial search retrieves TOP_K * 10 candidates (200 by default)
 - Cross-encoder reranking improves search precision
 - Top 25 documents passed to the LLM for comprehensive analysis
+- Timeline data automatically integrated for chronology-related queries
+- Query analyzer detects timeline-relevant questions and incorporates appropriate timeline events
 - Search configuration is handled in the INI file (TOP_K, SCORE_THRESHOLD, etc.)
 - Filters available by document type, date range, project name, monetary amount, etc.
 

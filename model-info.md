@@ -21,6 +21,7 @@ The application uses OpenAI models in three places, which can be configured in y
    - Used for: Extracting timeline events during ingestion
    - Location in code: `timeline.py` line ~142
    - Purpose: Identifies and extracts significant timeline events from documents
+   - Also used in query.py for integrating timeline data into question answering
 
 4. **Embedding Model** (`EMBED_MODEL` in config)
    - Default: `text-embedding-3-large`

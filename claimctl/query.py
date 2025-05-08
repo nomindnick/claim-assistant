@@ -19,17 +19,21 @@ from rich.table import Table
 from .config import get_config
 from .search import search_documents as search_docs
 from .utils import console
+from .timeline import generate_claim_timeline, get_timeline_events
+from .database import get_current_matter_id
 
 # Question answering prompt
 QA_PROMPT = """
-You are a construction claim assistant for an attorney representing public agencies and school districts. Your task is to answer questions about construction claims using only the provided document chunks, with special attention to contractual relationships and document chronology.
+You are a construction claim assistant for an attorney representing public agencies and school districts. Your task is to answer questions about construction claims using only the provided document chunks and timeline events, with special attention to contractual relationships and document chronology.
 
 Document chunks:
 {chunks}
 
+{timeline_section}
+
 Answer the following question in detail. Follow these requirements:
 
-1. Use only information from the provided documents
+1. Use only information from the provided documents and timeline events
 2. Include specific document references with each claim (e.g., "According to [Doc 3, p.5]...")
 3. Include document metadata like dates, project names, and parties when relevant
 4. Format citations consistently as [Doc X, p.Y] directly in-line with the text
@@ -42,11 +46,13 @@ Answer the following question in detail. Follow these requirements:
 8. Maintain chronological awareness of events and how documents relate to each other in time
 9. Be attentive to public agency approval processes and requirements that may differ from private construction
 10. For public agency or school district-specific requirements, note any special conditions that might apply
+11. When timeline data is provided, incorporate it to establish a clear chronology of events
+12. Reference timeline events using [Timeline Event X] format to distinguish them from document references
 
 After your answer, add:
 1. A "Sources" section that lists the documents you referenced, with the most relevant ones first
 2. A "Document Relationships" section that briefly describes how key documents relate to each other
-3. A "Chronology" section if the question involves a sequence of events
+3. A "Chronology" section that presents a concise timeline of relevant events, incorporating both document information and timeline events
 
 Question: {question}
 
@@ -178,7 +184,7 @@ def search_documents(
 def answer_question(
     question: str, chunks: List[Dict[str, Any]], follow_up_context: Optional[str] = None
 ) -> str:
-    """Generate an answer to the question using the provided chunks."""
+    """Generate an answer to the question using the provided chunks and timeline data."""
     config = get_config()
     context_size = config.retrieval.CONTEXT_SIZE
 
@@ -219,10 +225,63 @@ def answer_question(
             )
 
         formatted_chunks += "\n\n"
+    
+    # Check if query is timeline-related and add timeline events if so
+    timeline_section = ""
+    if is_timeline_relevant_query(question):
+        console.log("[green]Query appears to be timeline-related, incorporating timeline data")
+        
+        # Get current matter ID
+        matter_id = get_current_matter_id()
+        
+        if matter_id:
+            # Get timeline events with high confidence and importance
+            timeline_events = get_timeline_events(
+                matter_id=matter_id,
+                min_confidence=0.6,  # Higher confidence threshold for QA
+                min_importance=0.4,  # Focus on important events
+                include_contradictions=True,  # Include contradictions
+                include_financial_impacts=True,  # Include financial impacts
+                limit=25,  # Limit to 25 events to not overwhelm the context
+                sort_by="date"  # Sort by date for chronological order
+            )
+            
+            if timeline_events:
+                timeline_section = "Timeline Events:\n"
+                for i, event in enumerate(timeline_events):
+                    timeline_section += f"TIMELINE EVENT {i+1}: {event.get('event_date', 'Unknown date')}\n"
+                    timeline_section += f"Event Type: {event.get('event_type', 'Unknown')}\n"
+                    timeline_section += f"Description: {event.get('description', '')}\n"
+                    
+                    # Add financial impact if available
+                    if event.get('financial_impact') is not None:
+                        financial_impact = event.get('financial_impact', 0)
+                        if financial_impact >= 0:
+                            timeline_section += f"Financial Impact: +${financial_impact:,.2f}\n"
+                        else:
+                            timeline_section += f"Financial Impact: -${abs(financial_impact):,.2f}\n"
+                    
+                    # Add contradiction information if available
+                    if event.get('has_contradiction', False):
+                        timeline_section += f"Contradiction: {event.get('contradiction_details', 'Potential contradiction detected')}\n"
+                    
+                    # Add document reference
+                    if event.get('document') and event.get('document', {}).get('file_name'):
+                        timeline_section += f"Source Document: {event.get('document', {}).get('file_name')}\n"
+                    
+                    timeline_section += "\n"
+            else:
+                timeline_section = "No timeline events found for this matter.\n\n"
+        else:
+            timeline_section = "No active matter found. Timeline data unavailable.\n\n"
+    else:
+        console.log("[yellow]Query does not appear to be timeline-related. Skipping timeline integration.")
+        timeline_section = "No timeline data included for this query.\n\n"
 
     # Create prompt
     prompt = QA_PROMPT.format(
         chunks=formatted_chunks,
+        timeline_section=timeline_section,
         question=question,
         follow_up_context=follow_up_context or "",
     )
@@ -236,14 +295,16 @@ def answer_question(
             messages=[
                 {
                     "role": "system",
-                    "content": """You are a construction claim assistant skilled at answering questions based on provided document excerpts.
+                    "content": """You are a construction claim assistant skilled at answering questions based on provided document excerpts and timeline data.
                     
 Key characteristics of your responses:
-1. Thorough analysis of provided documents
+1. Thorough analysis of provided documents and timeline events
 2. Clear, specific citations for every claim
 3. Appropriate confidence indicators for claims
 4. Honest indication of information gaps
 5. Effective use of metadata (dates, parties, etc.) to contextualize information
+6. Clear chronological organization when time-based information is provided
+7. Integration of timeline events with document evidence
                     """,
                 },
                 {"role": "user", "content": prompt},
@@ -254,6 +315,61 @@ Key characteristics of your responses:
     except Exception as e:
         console.log(f"[bold red]Error generating answer: {str(e)}")
         return f"Sorry, I couldn't generate an answer due to an error: {str(e)}. Please check the source documents manually."
+
+
+def is_timeline_relevant_query(question: str) -> bool:
+    """Determine if a query is likely to benefit from timeline data.
+    
+    Args:
+        question: The user's question
+        
+    Returns:
+        True if the question appears to be timeline-related
+    """
+    # List of keywords that suggest timeline relevance
+    timeline_keywords = [
+        "when", "timeline", "chronology", "sequence", "history", "time", "date", 
+        "before", "after", "during", "schedule", "delay", "start", "end", "complete",
+        "finish", "milestone", "progress", "change order", "payment", "claim", "notice",
+        "correspondence", "meeting", "submittal", "RFI", "event", "occurrence",
+        "happened", "month", "year", "day", "January", "February", "March", "April",
+        "May", "June", "July", "August", "September", "October", "November", "December"
+    ]
+    
+    # Convert question to lowercase for case-insensitive matching
+    question_lower = question.lower()
+    
+    # Check for timeline keywords
+    for keyword in timeline_keywords:
+        if keyword.lower() in question_lower:
+            return True
+            
+    # Check for time-related patterns (e.g., dates, time periods)
+    import re
+    
+    # Check for date formats (MM/DD/YYYY, YYYY-MM-DD, etc.)
+    date_patterns = [
+        r'\d{1,2}/\d{1,2}/\d{2,4}',  # MM/DD/YYYY
+        r'\d{4}-\d{1,2}-\d{1,2}',    # YYYY-MM-DD
+        r'\b\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{2,4}\b'  # DD Month YYYY
+    ]
+    
+    for pattern in date_patterns:
+        if re.search(pattern, question):
+            return True
+    
+    # Check for timeline-related phrases
+    timeline_phrases = [
+        "what happened", "when did", "order of events", "time frame", "how long",
+        "project schedule", "project timeline", "critical path", "sequence of",
+        "what events", "key milestones", "time period", "project history"
+    ]
+    
+    for phrase in timeline_phrases:
+        if phrase.lower() in question_lower:
+            return True
+            
+    return False
 
 
 def display_results(

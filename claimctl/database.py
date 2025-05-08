@@ -955,6 +955,23 @@ def get_financial_events(
         return result
 
 
+def get_current_matter_id() -> Optional[int]:
+    """Get ID of the current matter.
+    
+    Returns:
+        The ID of the current matter, or None if no matter is active
+    """
+    from .config import get_current_matter
+    
+    matter_name = get_current_matter()
+    if not matter_name:
+        return None
+        
+    with get_session() as session:
+        matter = session.query(Matter).filter(Matter.name == matter_name).first()
+        return matter.id if matter else None
+
+
 def update_running_totals(matter_id: int) -> bool:
     """Recalculate running totals for all financial events in a matter.
     

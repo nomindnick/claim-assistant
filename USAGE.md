@@ -122,8 +122,9 @@ The system will:
 1. Find relevant documents based on semantic similarity (by default, the top 25 documents)
 2. Rerank results using a cross-encoder model for more accurate relevance scoring
 3. Extract and analyze metadata from documents (amounts, time periods, section references, etc.)
-4. Generate a comprehensive answer using GPT-4o-mini
-5. Display source documents with their relevance scores and extracted metadata
+4. Automatically analyze if the query is time-related and incorporate relevant timeline events if needed
+5. Generate a comprehensive answer using GPT-4o-mini, integrating both document content and timeline data
+6. Display source documents with their relevance scores and extracted metadata
 
 ### Interactive Commands
 
@@ -432,7 +433,7 @@ The clear command will ask for confirmation before deleting any data and will pr
 
 ### Working with Timelines
 
-The system can extract timeline events from your documents and create comprehensive claim chronologies. Timeline events are automatically extracted during document ingestion (configurable with `--timeline-extract/--no-timeline-extract`), but you can also run the extraction process manually:
+The system can extract timeline events from your documents and create comprehensive claim chronologies. Timeline events are automatically extracted during document ingestion (configurable with `--timeline-extract/--no-timeline-extract`), but you can also run the extraction process manually. Furthermore, timeline data is automatically integrated into question-answering when queries are chronology-related:
 
 ```bash
 # Extract timeline events from all documents in the current matter (if not already extracted during ingestion)
@@ -624,6 +625,9 @@ ingest ~/office-project-docs/*.pdf
 
 # Ask a complex question
 ask Compare all the change orders related to site conditions --top-k 10
+
+# Ask a time-related question (automatically incorporates timeline events)
+ask When were the major project delays and what caused them?
 
 # Switch back to the first matter
 matter switch "Highway Project"

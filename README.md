@@ -25,6 +25,7 @@ Construction Claim Assistant is designed to help construction professionals, att
 - **Financial Impact Tracking**: Monitors monetary changes across change orders, payments, and claims
 - **Contradiction Detection**: Identifies conflicting information between different project documents
 - **Timeline Export**: Exports comprehensive timelines as PDFs with financial analysis
+- **Timeline-Query Integration**: Automatically incorporates timeline data into chronology-related questions
 - **Low Resource Usage**: Works efficiently on standard laptops (≤3GB RAM)
 
 ## Installation
