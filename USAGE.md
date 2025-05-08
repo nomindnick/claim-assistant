@@ -123,7 +123,7 @@ The system will:
 2. Rerank results using a cross-encoder model for more accurate relevance scoring
 3. Extract and analyze metadata from documents (amounts, time periods, section references, etc.)
 4. Automatically analyze if the query is time-related and incorporate relevant timeline events if needed
-5. Generate a comprehensive answer using GPT-4o-mini, integrating both document content and timeline data
+5. Generate a comprehensive answer using o4-mini-2025-04-16, integrating both document content and timeline data
 6. Display source documents with their relevance scores and extracted metadata
 
 ### Interactive Commands

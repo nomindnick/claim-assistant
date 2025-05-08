@@ -189,7 +189,7 @@ def extract_timeline_events(
         # Query OpenAI
         client = OpenAI(api_key=config.openai.API_KEY)
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=config.openai.MODEL,  # Use the configured model instead of hardcoded value
             messages=[
                 {
                     "role": "system",
@@ -614,7 +614,7 @@ def generate_timeline_summary(events: List[Dict[str, Any]]) -> str:
         # Query OpenAI
         client = OpenAI(api_key=config.openai.API_KEY)
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=config.openai.MODEL,  # Use the configured model instead of hardcoded value
             messages=[
                 {
                     "role": "system",

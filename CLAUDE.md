@@ -83,7 +83,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - See `docs/chunking.md` for detailed explanations
 
 ### Model Usage
-- Main completion model (`gpt-4o-mini` by default): Answers questions
+- Main completion model (`o4-mini-2025-04-16` by default): Answers questions
 - Embedding model (`text-embedding-3-large` by default): Generates vector embeddings
 - Cross-encoder model: Reranks search results for better precision
 - Models can be configured in `~/.claimctl.ini`

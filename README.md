@@ -81,7 +81,7 @@ INDEX_DIR = ./index
 
 [openai]
 API_KEY = your_openai_api_key
-MODEL = gpt-4o-mini
+MODEL = gpt-4.1-mini
 EMBED_MODEL = text-embedding-3-large
 
 [retrieval]

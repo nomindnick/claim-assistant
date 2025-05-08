@@ -5,19 +5,19 @@ The application uses OpenAI models in three places, which can be configured in y
 ## Models Used
 
 1. **Main Completion Model** (`MODEL` in config)
-   - Default: `gpt-4o-mini`
+   - Default: `gpt-4.1-mini`
    - Used for: Answering questions based on retrieved documents
    - Location in code: `query.py` line ~127
    - Purpose: Generates comprehensive answers to user questions
 
 2. **Document Classifier Model** (`MODEL` in config)
-   - Default: `gpt-4o-mini`
+   - Default: `gpt-4.1-mini`
    - Used for: Classifying document types during ingestion
    - Location in code: `ingest.py` line ~102
    - Purpose: Determines if a document is an Email, ChangeOrder, Invoice, etc.
 
 3. **Timeline Extractor Model** (`MODEL` in config)
-   - Default: `gpt-4o-mini`
+   - Default: `gpt-4.1-mini`
    - Used for: Extracting timeline events during ingestion
    - Location in code: `timeline.py` line ~142
    - Purpose: Identifies and extracts significant timeline events from documents
@@ -36,7 +36,7 @@ You can update the models by editing your `~/.claimctl.ini` file:
 ```ini
 [openai]
 API_KEY = your-api-key
-MODEL = gpt-4o-mini  # Change to any OpenAI completion model
+MODEL = gpt-4.1-mini  # Change to any OpenAI completion model
 EMBED_MODEL = text-embedding-3-large  # Change to any OpenAI embedding model
 
 [matter]
@@ -56,4 +56,4 @@ If you see "model not found" warnings, it typically means:
 
 1. The embedding model name might need updating (currently using `text-embedding-3-large`)
 
-Make sure the models you specify in the config are valid and available in your OpenAI account. The newest models are `gpt-4o` (powerful but more expensive) and `gpt-4o-mini` (more economical).
+Make sure the models you specify in the config are valid and available in your OpenAI account. The recommended models are `gpt-4.1-2025-04-14` (powerful but more expensive) and `gpt-4.1-mini` (more economical).
