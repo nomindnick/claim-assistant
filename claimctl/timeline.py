@@ -29,6 +29,7 @@ from .database import (
     PageChunk, 
     TimelineEvent, 
     FinancialEvent,
+    Matter,
     get_document_by_path,
     get_session, 
     get_timeline_events,
