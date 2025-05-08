@@ -1026,7 +1026,7 @@ def timeline_show_command(
         0.5, "--min-confidence", help="Minimum confidence score (0-1)"
     ),
     max_events: int = typer.Option(
-        100, "--max-events", help="Maximum number of events to show"
+        1000, "--max-events", help="Maximum number of events to show (default: 1000)"
     ),
     format: str = typer.Option(
         "table", "--format", "-f", help="Output format: table or text"
@@ -1139,7 +1139,7 @@ def timeline_export_command(
         0.5, "--min-confidence", help="Minimum confidence score (0-1)"
     ),
     max_events: int = typer.Option(
-        100, "--max-events", help="Maximum number of events to show"
+        1000, "--max-events", help="Maximum number of events to show (default: 1000)"
     ),
     include_financials: bool = typer.Option(
         True, "--financials/--no-financials", help="Include financial impact summary"
