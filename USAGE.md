@@ -87,6 +87,10 @@ python -m claimctl.cli ingest /path/to/directory --no-hierarchical-chunking
 # Control ingestion logging
 python -m claimctl.cli ingest /path/to/directory --logging      # Enable detailed logging (default)
 python -m claimctl.cli ingest /path/to/directory --no-logging   # Disable detailed logging
+
+# Control automatic timeline extraction
+python -m claimctl.cli ingest /path/to/directory --timeline-extract     # Enable timeline extraction (default)
+python -m claimctl.cli ingest /path/to/directory --no-timeline-extract  # Disable timeline extraction
 ```
 
 During ingestion, the system:
@@ -98,6 +102,7 @@ During ingestion, the system:
 - Analyzes document structure for optimal chunking
 - Creates semantic chunks respecting document boundaries
 - Generates embeddings for semantic search
+- Automatically extracts timeline events from document chunks (if enabled)
 - Stores everything in the database
 
 ### Asking Questions
@@ -368,6 +373,11 @@ You can edit `~/.claimctl.ini` to change:
 - BM25 search parameters (K1, B, WEIGHT)
 - Project settings (DEFAULT_PROJECT)
 - Matter settings (MATTER_DIR, CURRENT_MATTER)
+- Timeline settings:
+  - AUTO_EXTRACT: Enable automatic timeline extraction during ingestion (default is True)
+  - EXTRACT_CONFIDENCE_THRESHOLD: Minimum confidence score for extracted events (default is 0.5)
+  - EXTRACT_IMPORTANCE_THRESHOLD: Minimum importance score for extracted events (default is 0.3)
+  - EXTRACTION_BATCH_SIZE: Number of chunks to process in a batch (default is 10)
 
 ### Environment Variables
 
@@ -422,10 +432,10 @@ The clear command will ask for confirmation before deleting any data and will pr
 
 ### Working with Timelines
 
-The system can extract timeline events from your documents and create comprehensive claim chronologies:
+The system can extract timeline events from your documents and create comprehensive claim chronologies. Timeline events are automatically extracted during document ingestion (configurable with `--timeline-extract/--no-timeline-extract`), but you can also run the extraction process manually:
 
 ```bash
-# Extract timeline events from all documents in the current matter
+# Extract timeline events from all documents in the current matter (if not already extracted during ingestion)
 python -m claimctl.cli timeline extract
 
 # Show the timeline for the current matter

@@ -61,6 +61,16 @@ class BM25Config:
 
 
 @dataclass
+class TimelineConfig:
+    """Timeline configuration."""
+
+    AUTO_EXTRACT: bool = True  # Enable timeline extraction during ingestion
+    EXTRACT_CONFIDENCE_THRESHOLD: float = 0.5  # Minimum confidence for extracted events
+    EXTRACT_IMPORTANCE_THRESHOLD: float = 0.3  # Minimum importance for extracted events
+    EXTRACTION_BATCH_SIZE: int = 10  # Number of chunks to process in a batch
+
+
+@dataclass
 class ProjectConfig:
     """Project metadata configuration."""
 
@@ -86,6 +96,7 @@ class Config:
     bm25: BM25Config
     project: ProjectConfig
     matter: MatterConfig  # Add matter configuration
+    timeline: TimelineConfig  # Add timeline configuration
 
 
 def load_config() -> configparser.ConfigParser:
@@ -134,6 +145,12 @@ def load_config() -> configparser.ConfigParser:
         "MATTER_DIR": "./matters",
         "CURRENT_MATTER": "",
         "MATTER_SETTINGS": "{}",
+    }
+    config["timeline"] = {
+        "AUTO_EXTRACT": "True",
+        "EXTRACT_CONFIDENCE_THRESHOLD": "0.5",
+        "EXTRACT_IMPORTANCE_THRESHOLD": "0.3",
+        "EXTRACTION_BATCH_SIZE": "10",
     }
 
     # Read configuration file
@@ -239,6 +256,21 @@ def get_config() -> Config:
         MATTER_SETTINGS=matter_settings,
     )
 
+    # Parse timeline config with defaults if section missing
+    if not config_parser.has_section("timeline"):
+        config_parser.add_section("timeline")
+        config_parser.set("timeline", "AUTO_EXTRACT", "True")
+        config_parser.set("timeline", "EXTRACT_CONFIDENCE_THRESHOLD", "0.5")
+        config_parser.set("timeline", "EXTRACT_IMPORTANCE_THRESHOLD", "0.3")
+        config_parser.set("timeline", "EXTRACTION_BATCH_SIZE", "10")
+    
+    timeline_config = TimelineConfig(
+        AUTO_EXTRACT=config_parser.getboolean("timeline", "AUTO_EXTRACT", fallback=True),
+        EXTRACT_CONFIDENCE_THRESHOLD=config_parser.getfloat("timeline", "EXTRACT_CONFIDENCE_THRESHOLD", fallback=0.5),
+        EXTRACT_IMPORTANCE_THRESHOLD=config_parser.getfloat("timeline", "EXTRACT_IMPORTANCE_THRESHOLD", fallback=0.3),
+        EXTRACTION_BATCH_SIZE=config_parser.getint("timeline", "EXTRACTION_BATCH_SIZE", fallback=10),
+    )
+    
     return Config(
         paths=paths_config,
         openai=openai_config,
@@ -247,6 +279,7 @@ def get_config() -> Config:
         bm25=bm25_config,
         project=project_config,
         matter=matter_config,
+        timeline=timeline_config,
     )
 
 
@@ -332,6 +365,12 @@ def show_config() -> Dict[str, Any]:
         "matter": {
             "MATTER_DIR": config.matter.MATTER_DIR,
             "CURRENT_MATTER": config.matter.CURRENT_MATTER or "None",
+        },
+        "timeline": {
+            "AUTO_EXTRACT": config.timeline.AUTO_EXTRACT,
+            "EXTRACT_CONFIDENCE_THRESHOLD": config.timeline.EXTRACT_CONFIDENCE_THRESHOLD,
+            "EXTRACT_IMPORTANCE_THRESHOLD": config.timeline.EXTRACT_IMPORTANCE_THRESHOLD,
+            "EXTRACTION_BATCH_SIZE": config.timeline.EXTRACTION_BATCH_SIZE,
         },
     }
 

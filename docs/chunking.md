@@ -49,6 +49,7 @@ Available flags:
 - `--semantic-chunking/--no-semantic-chunking`: Toggle semantic chunking
 - `--hierarchical-chunking/--no-hierarchical-chunking`: Toggle hierarchical chunking
 - `--adaptive-chunking/--no-adaptive-chunking`: Toggle adaptive chunking
+- `--timeline-extract/--no-timeline-extract`: Toggle automatic timeline event extraction during ingestion
 
 ## Chunk Visualization Tool
 

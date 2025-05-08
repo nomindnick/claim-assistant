@@ -99,6 +99,8 @@ class ClaimAssistantShell:
                 "--no-resume": None,
                 "--logging": None,
                 "--no-logging": None,
+                "--timeline-extract": None,
+                "--no-timeline-extract": None,
                 # Use explicit string paths - path_completer can sometimes cause issues
                 "": path_completer,
             },

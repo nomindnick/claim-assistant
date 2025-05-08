@@ -27,6 +27,7 @@ from .database import (
     save_page_chunk,
 )
 from .semantic_chunking import create_semantic_chunks, create_hierarchical_chunks, fallback_chunk_text, create_adaptive_chunks
+from .timeline import extract_timeline_events, batch_extract_timeline_events
 from .utils import (
     calculate_sha256,
     console,
@@ -801,6 +802,9 @@ def process_pdf(
                     # Save to database
                     save_page_chunk(chunk_data)
 
+                # Store chunk_data for timeline extraction
+                chunk_data_list[i] = chunk_data
+
                 progress.update(
                     task_id, advance=1, description=f"Processed {chunk_type} ({confidence}%)"
                 )
@@ -816,6 +820,40 @@ def process_pdf(
 
         # All pages processed successfully, save index
         save_faiss_index(index)
+        
+        # Check if automatic timeline extraction is enabled
+        if config.timeline.AUTO_EXTRACT and chunk_data_list:
+            timeline_extraction_start = time.time()
+            console.log(f"[bold green]Extracting timeline events from {len(chunk_data_list)} chunks...")
+            
+            try:
+                # Process in batches according to configuration
+                batch_size = config.timeline.EXTRACTION_BATCH_SIZE
+                total_events = 0
+                
+                # Add a progress task for timeline extraction
+                timeline_task = progress.add_task("Extracting timeline events", total=len(chunk_data_list))
+                
+                # Process chunks in batches
+                for i in range(0, len(chunk_data_list), batch_size):
+                    batch = chunk_data_list[i:i+batch_size]
+                    events = batch_extract_timeline_events(batch, matter_id, progress)
+                    total_events += len(events)
+                    
+                    # Update progress
+                    progress.update(timeline_task, advance=len(batch))
+                
+                timeline_extraction_time = time.time() - timeline_extraction_start
+                console.log(f"[bold green]Timeline extraction complete: {total_events} events extracted in {timeline_extraction_time:.2f} seconds")
+                
+                # Log timeline extraction in logger
+                if ingestion_logger:
+                    ingestion_logger.log_extraction(pdf_path, -1, "timeline_events", f"{total_events} events", total_events > 0)
+            except Exception as e:
+                console.log(f"[bold red]Error extracting timeline events: {str(e)}")
+                # Log error in logger
+                if ingestion_logger:
+                    ingestion_logger.log_error(pdf_path, "timeline_extraction_error", str(e))
         
         # Log successful document completion
         doc_processing_time = time.time() - doc_start_time

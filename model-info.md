@@ -16,7 +16,13 @@ The application uses OpenAI models in three places, which can be configured in y
    - Location in code: `ingest.py` line ~102
    - Purpose: Determines if a document is an Email, ChangeOrder, Invoice, etc.
 
-3. **Embedding Model** (`EMBED_MODEL` in config)
+3. **Timeline Extractor Model** (`MODEL` in config)
+   - Default: `gpt-4o-mini`
+   - Used for: Extracting timeline events during ingestion
+   - Location in code: `timeline.py` line ~142
+   - Purpose: Identifies and extracts significant timeline events from documents
+
+4. **Embedding Model** (`EMBED_MODEL` in config)
    - Default: `text-embedding-3-large`
    - Used for: Generating vector embeddings for text search
    - Location in code: `ingest.py` line ~177

@@ -21,7 +21,7 @@ Construction Claim Assistant is designed to help construction professionals, att
 - **Interactive Shell**: Command-line shell with history, auto-completion, and contextual help
 - **Chunk Visualization**: Tools to visualize and compare different document chunking methods
 - **Ingestion Logging**: Detailed metrics and statistics about document processing and classification
-- **Timeline Generation**: Automatically extracts events to create a claim chronology with visual display
+- **Timeline Generation**: Automatically extracts events during ingestion to create a claim chronology with visual display
 - **Financial Impact Tracking**: Monitors monetary changes across change orders, payments, and claims
 - **Contradiction Detection**: Identifies conflicting information between different project documents
 - **Timeline Export**: Exports comprehensive timelines as PDFs with financial analysis
@@ -111,6 +111,12 @@ DEFAULT_PROJECT =
 MATTER_DIR = ./matters
 CURRENT_MATTER = 
 MATTER_SETTINGS = {}
+
+[timeline]
+AUTO_EXTRACT = True
+EXTRACT_CONFIDENCE_THRESHOLD = 0.5
+EXTRACT_IMPORTANCE_THRESHOLD = 0.3
+EXTRACTION_BATCH_SIZE = 10
 ```
 
 You can also use environment variables to override these settings:
@@ -154,6 +160,10 @@ claimctl ingest path/to/project/*.pdf
 
 # Ingest into a specific matter
 claimctl ingest path/to/project/*.pdf --matter "Office Building Project"
+
+# Control automatic timeline extraction
+claimctl ingest path/to/project/*.pdf --timeline-extract  # Enable timeline extraction
+claimctl ingest path/to/project/*.pdf --no-timeline-extract  # Disable timeline extraction
 ```
 
 You can perform the same operations in the interactive shell with simpler syntax.
@@ -165,6 +175,7 @@ The ingestion process:
 - Classifies document types
 - Generates embeddings for semantic search
 - Stores metadata in a local database
+- Automatically extracts timeline events for chronology
 
 ### Managing Matters
 

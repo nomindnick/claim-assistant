@@ -56,9 +56,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Document Ingestion
 - Processing happens in `claimctl/ingest.py`
-- Ingestion pipeline: PDF extraction → OCR → chunking → classification → embedding
+- Ingestion pipeline: PDF extraction → OCR → chunking → classification → embedding → timeline extraction
 - Advanced semantic chunking is implemented in `claimctl/semantic_chunking.py`
 - Document classification uses OpenAI models to categorize documents (Email, ChangeOrder, etc.)
+- Automatic timeline event extraction occurs during ingestion (configurable via `--timeline-extract/--no-timeline-extract`)
 - Detailed metrics logging is handled by `claimctl/ingestion_logger.py`
 - Large documents (>500K chars) use memory-optimized processing
 
@@ -97,6 +98,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - OpenAI API key and model selection
   - Retrieval parameters (TOP_K, SCORE_THRESHOLD, etc.)
   - Chunking parameters (CHUNK_SIZE, SEMANTIC_CHUNKING, etc.)
+  - Timeline parameters (AUTO_EXTRACT, EXTRACTION_BATCH_SIZE, etc.)
   - Matter-specific settings
 - Override with environment variables like `CLAIMCTL_OPENAI_API_KEY`
 
@@ -106,6 +108,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Enhanced metadata extraction
 - Cross-encoder reranking for improved search precision
 - Timeline generation and visualization
+- Automatic timeline extraction during document ingestion
 - Financial impact tracking and analysis
 - Contradiction detection in timeline events
 - Timeline PDF export functionality

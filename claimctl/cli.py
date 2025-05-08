@@ -93,6 +93,10 @@ def ingest_command(
         True, "--logging/--no-logging", 
         help="Enable detailed ingestion logging"
     ),
+    timeline_extract: bool = typer.Option(
+        None, "--timeline-extract/--no-timeline-extract",
+        help="Enable automatic timeline event extraction during ingestion"
+    ),
 ) -> None:
     """Ingest PDF files into the claim assistant database."""
     # Expand directories to individual PDF files if needed
@@ -147,6 +151,8 @@ def ingest_command(
             config.chunking.HIERARCHICAL_CHUNKING = hierarchical_chunking
         if adaptive_chunking is not None:
             config.chunking.ADAPTIVE_CHUNKING = adaptive_chunking
+        if timeline_extract is not None:
+            config.timeline.AUTO_EXTRACT = timeline_extract
         
         ingest_pdfs(
             expanded_paths,
