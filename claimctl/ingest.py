@@ -567,8 +567,24 @@ def process_pdf(
     project_name: Optional[str] = None,
     matter_id: Optional[int] = None,
     ingestion_logger: Optional[Any] = None,  # Added logger parameter
-) -> None:
-    """Process a PDF file: extract text, metadata, generate embeddings."""
+    collect_chunks: bool = False,  # Whether to collect and return chunks instead of saving directly
+    defer_saving: bool = False,    # Whether to defer saving chunks to database
+) -> Union[None, List[Dict[str, Any]]]:
+    """Process a PDF file: extract text, metadata, generate embeddings.
+    
+    Args:
+        pdf_path: Path to the PDF file
+        progress: Progress bar object
+        task_id: Task ID for the progress bar
+        project_name: Optional project name
+        matter_id: Optional matter ID
+        ingestion_logger: Optional ingestion logger
+        collect_chunks: Whether to collect and return chunks instead of saving directly
+        defer_saving: Whether to defer saving chunks to database
+        
+    Returns:
+        None if collect_chunks is False, otherwise a list of chunk data dictionaries
+    """
     config = get_config()
     console.log(f"Processing {pdf_path}")
     
@@ -578,6 +594,9 @@ def process_pdf(
     # Log document processing start
     if ingestion_logger:
         ingestion_logger.log_document_start(pdf_path)
+        
+    # Initialize list to collect chunks if requested
+    collected_chunks = [] if collect_chunks else None
 
     # Initialize document
     try:
@@ -799,8 +818,12 @@ def process_pdf(
                         }
                     )
 
-                    # Save to database
-                    save_page_chunk(chunk_data)
+                    # Save to database or collect the chunk data
+                    if collect_chunks:
+                        collected_chunks.append(chunk_data)
+                    
+                    if not defer_saving:
+                        save_page_chunk(chunk_data)
 
                 # Store chunk_data for timeline extraction
                 chunk_data_list[i] = chunk_data
@@ -886,12 +909,17 @@ def process_pdf(
 
     # Close document
     doc.close()
+    
+    # Return collected chunks if requested
+    if collect_chunks:
+        return collected_chunks
 
 
 def batch_generate_embeddings(
     chunks: List[Dict[str, Any]],
-    batch_size: int = 10,
+    batch_size: int = 25,  # Increased default batch size from 10 to 25
     progress: Optional[Progress] = None,
+    use_cache: bool = True,  # Enable embedding caching by default
 ) -> np.ndarray:
     """Generate embeddings in batches to avoid API rate limits.
 
@@ -899,92 +927,214 @@ def batch_generate_embeddings(
         chunks: List of text chunks to embed
         batch_size: Number of embeddings to generate in each batch
         progress: Optional existing progress bar to use
+        use_cache: Whether to use embedding cache
 
     Returns:
         Array of embeddings for all chunks
     """
+    import hashlib
+    import json
+    import pickle
+    from pathlib import Path
+    from datetime import datetime, timedelta
+    
+    config = get_config()
+    
+    # Get or create cache directory
+    cache_dir = Path(config.paths.DATA_DIR) / "embedding_cache"
+    cache_dir.mkdir(exist_ok=True)
+    
+    # Generate cache keys for each chunk
     texts = [chunk["text"] for chunk in chunks]
     total_chunks = len(texts)
     embeddings_list = []
-
+    
+    # Track which chunks need embeddings
+    chunks_to_embed = []
+    chunk_indices = []
+    cached_embeddings = {}
+    
+    # Check cache first if enabled
+    if use_cache:
+        for i, text in enumerate(texts):
+            # Generate a stable hash for the text
+            text_hash = hashlib.md5(text.encode('utf-8')).hexdigest()
+            cache_key = f"{text_hash}_{config.openai.EMBED_MODEL.replace('/', '_')}"
+            cache_file = cache_dir / f"{cache_key}.pkl"
+            
+            # Check if we have a cached embedding
+            if cache_file.exists():
+                try:
+                    # Check if cache is fresh (less than 30 days old)
+                    cache_age = datetime.now() - datetime.fromtimestamp(cache_file.stat().st_mtime)
+                    if cache_age < timedelta(days=30):  # Cache valid for 30 days
+                        with open(cache_file, 'rb') as f:
+                            cached_embeddings[i] = pickle.load(f)
+                        continue
+                except Exception as e:
+                    # If any error occurs with the cache, just generate the embedding
+                    console.log(f"[yellow]Cache error for {cache_key}: {str(e)}")
+            
+            # If we get here, we need to generate the embedding
+            chunks_to_embed.append(text)
+            chunk_indices.append(i)
+    else:
+        # If cache is disabled, embed all chunks
+        chunks_to_embed = texts
+        chunk_indices = list(range(len(texts)))
+    
+    # If there are cached embeddings, log how many we're using
+    if cached_embeddings:
+        console.log(f"[green]Using {len(cached_embeddings)} cached embeddings out of {total_chunks} total chunks")
+    
+    # Prepare array for final embeddings
+    embedding_dim = 3072  # Default for text-embedding-3-large
+    all_embeddings = np.zeros((total_chunks, embedding_dim), dtype=np.float32)
+    
+    # Add cached embeddings to the array
+    for idx, embedding in cached_embeddings.items():
+        all_embeddings[idx] = embedding
+    
+    # If all embeddings are cached, return early
+    if not chunks_to_embed:
+        return all_embeddings
+    
+    # Determine optimal batch size based on number of chunks
+    # For very large datasets, use larger batches to reduce API calls
+    adaptive_batch_size = batch_size
+    if len(chunks_to_embed) > 1000:
+        adaptive_batch_size = min(50, batch_size * 2)  # Double batch size but cap at 50
+        console.log(f"[green]Increasing embedding batch size to {adaptive_batch_size} for large dataset")
+    
     # Process embeddings without progress bar if none provided
     if progress is None:
         console.log(
-            f"Generating embeddings for {total_chunks} chunks in batches of {batch_size}"
+            f"Generating embeddings for {len(chunks_to_embed)} chunks in batches of {adaptive_batch_size}"
         )
 
         # Process in batches
-        for i in range(0, total_chunks, batch_size):
-            batch_texts = texts[i : i + batch_size]
+        for i in range(0, len(chunks_to_embed), adaptive_batch_size):
+            batch_texts = chunks_to_embed[i : i + adaptive_batch_size]
+            batch_indices = chunk_indices[i : i + adaptive_batch_size]
+            
             try:
                 # Get embeddings for this batch
                 batch_embeddings = get_embeddings(batch_texts)
-                embeddings_list.append(batch_embeddings)
+                
+                # Store in the appropriate positions
+                for j, (idx, embedding) in enumerate(zip(batch_indices, batch_embeddings)):
+                    all_embeddings[idx] = embedding
+                    
+                    # Cache the embedding if caching is enabled
+                    if use_cache:
+                        text = texts[idx]
+                        text_hash = hashlib.md5(text.encode('utf-8')).hexdigest()
+                        cache_key = f"{text_hash}_{config.openai.EMBED_MODEL.replace('/', '_')}"
+                        cache_file = cache_dir / f"{cache_key}.pkl"
+                        
+                        try:
+                            with open(cache_file, 'wb') as f:
+                                pickle.dump(embedding, f)
+                        except Exception as e:
+                            console.log(f"[yellow]Error caching embedding: {str(e)}")
+                
                 console.log(
-                    f"Completed embedding batch {i//batch_size + 1}/{math.ceil(total_chunks/batch_size)}"
+                    f"Completed embedding batch {i//adaptive_batch_size + 1}/{math.ceil(len(chunks_to_embed)/adaptive_batch_size)}"
                 )
             except Exception as e:
-                console.log(f"[bold red]Error in batch {i//batch_size + 1}: {str(e)}")
+                console.log(f"[bold red]Error in batch {i//adaptive_batch_size + 1}: {str(e)}")
+                
                 # Create fallback random embeddings for this batch
-                fallback_embeddings = np.zeros(
-                    (len(batch_texts), 3072), dtype=np.float32
-                )
-                for j, text in enumerate(batch_texts):
+                for j, idx in enumerate(batch_indices):
+                    text = texts[idx]
                     text_hash = hash(text) % 10000
                     np.random.seed(text_hash)
-                    random_embedding = np.random.randn(3072).astype(np.float32)
+                    random_embedding = np.random.randn(embedding_dim).astype(np.float32)
                     # Normalize to unit length
-                    random_embedding = random_embedding / np.linalg.norm(
-                        random_embedding
-                    )
-                    fallback_embeddings[j] = random_embedding
-                embeddings_list.append(fallback_embeddings)
+                    random_embedding = random_embedding / np.linalg.norm(random_embedding)
+                    all_embeddings[idx] = random_embedding
     else:
         # Use the provided progress bar
         task_id = progress.add_task(
-            "Generating embeddings", total=math.ceil(total_chunks / batch_size)
+            "Generating embeddings", total=math.ceil(len(chunks_to_embed) / adaptive_batch_size)
         )
 
         # Process in batches
-        for i in range(0, total_chunks, batch_size):
-            batch_texts = texts[i : i + batch_size]
+        for i in range(0, len(chunks_to_embed), adaptive_batch_size):
+            batch_texts = chunks_to_embed[i : i + adaptive_batch_size]
+            batch_indices = chunk_indices[i : i + adaptive_batch_size]
+            
             progress.update(
                 task_id,
                 advance=0,
-                description=f"Embedding batch {i//batch_size + 1}/{math.ceil(total_chunks/batch_size)}",
+                description=f"Embedding batch {i//adaptive_batch_size + 1}/{math.ceil(len(chunks_to_embed)/adaptive_batch_size)}",
             )
 
             try:
                 # Get embeddings for this batch
                 batch_embeddings = get_embeddings(batch_texts)
-                embeddings_list.append(batch_embeddings)
+                
+                # Store in the appropriate positions
+                for j, (idx, embedding) in enumerate(zip(batch_indices, batch_embeddings)):
+                    all_embeddings[idx] = embedding
+                    
+                    # Cache the embedding if caching is enabled
+                    if use_cache:
+                        text = texts[idx]
+                        text_hash = hashlib.md5(text.encode('utf-8')).hexdigest()
+                        cache_key = f"{text_hash}_{config.openai.EMBED_MODEL.replace('/', '_')}"
+                        cache_file = cache_dir / f"{cache_key}.pkl"
+                        
+                        try:
+                            with open(cache_file, 'wb') as f:
+                                pickle.dump(embedding, f)
+                        except Exception as e:
+                            console.log(f"[yellow]Error caching embedding: {str(e)}")
+                
                 # Update progress
                 progress.update(
-                    task_id, advance=1, description=f"Completed batch {i//batch_size + 1}"
+                    task_id, advance=1, description=f"Completed batch {i//adaptive_batch_size + 1}"
                 )
             except Exception as e:
-                console.log(f"[bold red]Error in batch {i//batch_size + 1}: {str(e)}")
+                console.log(f"[bold red]Error in batch {i//adaptive_batch_size + 1}: {str(e)}")
                 # Still advance progress
                 progress.update(
-                    task_id, advance=1, description=f"Error in batch {i//batch_size + 1}"
+                    task_id, advance=1, description=f"Error in batch {i//adaptive_batch_size + 1}"
                 )
+                
                 # Create fallback random embeddings for this batch
-                fallback_embeddings = np.zeros(
-                    (len(batch_texts), 3072), dtype=np.float32
-                )
-                for j, text in enumerate(batch_texts):
+                for j, idx in enumerate(batch_indices):
+                    text = texts[idx]
                     text_hash = hash(text) % 10000
                     np.random.seed(text_hash)
-                    random_embedding = np.random.randn(3072).astype(np.float32)
+                    random_embedding = np.random.randn(embedding_dim).astype(np.float32)
                     # Normalize to unit length
-                    random_embedding = random_embedding / np.linalg.norm(
-                        random_embedding
-                    )
-                    fallback_embeddings[j] = random_embedding
-                embeddings_list.append(fallback_embeddings)
+                    random_embedding = random_embedding / np.linalg.norm(random_embedding)
+                    all_embeddings[idx] = random_embedding
 
-    # Combine all batches
-    return np.vstack(embeddings_list) if embeddings_list else np.array([])
+    # Clean up old cache files (older than 30 days) in the background
+    try:
+        import threading
+        
+        def clean_old_cache_files():
+            try:
+                now = datetime.now()
+                count = 0
+                for cache_file in cache_dir.glob("*.pkl"):
+                    if now - datetime.fromtimestamp(cache_file.stat().st_mtime) > timedelta(days=30):
+                        cache_file.unlink()
+                        count += 1
+                if count > 0:
+                    console.log(f"[dim]Cleaned {count} old embedding cache files[/dim]")
+            except Exception as e:
+                console.log(f"[yellow]Error cleaning cache: {str(e)}")
+        
+        # Start cache cleaning in background thread
+        threading.Thread(target=clean_old_cache_files, daemon=True).start()
+    except Exception as e:
+        console.log(f"[yellow]Error starting cache cleanup: {str(e)}")
+
+    return all_embeddings
 
 
 def ingest_pdfs(
@@ -994,8 +1144,10 @@ def ingest_pdfs(
     resume_on_error: bool = True,
     matter_name: Optional[str] = None,  # Add matter_name parameter
     enable_logging: bool = True,  # Enable ingestion logging by default
+    max_workers: int = None,  # Number of parallel workers (None = auto-determine)
+    defer_timeline: bool = False,  # Whether to defer timeline extraction
 ) -> None:
-    """Ingest a list of PDF files with matter awareness.
+    """Ingest a list of PDF files with matter awareness and parallel processing.
 
     Args:
         pdf_paths: List of PDF paths to process
@@ -1004,7 +1156,12 @@ def ingest_pdfs(
         resume_on_error: Whether to continue processing after errors
         matter_name: Optional matter name to associate with documents
         enable_logging: Whether to enable detailed ingestion logging (default: True)
+        max_workers: Maximum number of workers for parallel processing (default: CPU count)
+        defer_timeline: Whether to defer timeline extraction until after ingestion
     """
+    import concurrent.futures
+    import psutil
+    
     # Use current matter if not specified
     from .config import get_current_matter, set_current_matter
     from .database import get_session, Matter
@@ -1045,6 +1202,13 @@ def ingest_pdfs(
     # Temporarily set paths for this matter
     config.paths.DATA_DIR = str(data_dir)
     config.paths.INDEX_DIR = str(index_dir)
+    
+    # Auto-determine optimal number of workers if not specified
+    if max_workers is None:
+        # Use half of available CPU cores, but at least 2 and at most 8
+        cpu_count = psutil.cpu_count(logical=False) or psutil.cpu_count()
+        max_workers = max(2, min(cpu_count // 2, 8))
+        console.log(f"[green]Auto-configured parallel processing with {max_workers} workers")
     
     # Initialize ingestion logger if enabled
     ingestion_logger = None
@@ -1135,30 +1299,91 @@ def ingest_pdfs(
                     )
                     pdf_tasks[pdf_path] = task_id
     
-                # Process each PDF in this batch
-                for pdf_path, task_id in pdf_tasks.items():
+                # Process each PDF in this batch in parallel
+                batch_results = []
+                batch_errors = []
+                
+                # Define a function to process a single PDF for the ThreadPoolExecutor
+                def process_pdf_wrapper(pdf_path, task_id):
                     try:
-                        # Pass the same progress object, matter_id, and logger
-                        process_pdf(pdf_path, progress, task_id, project_name, matter.id, ingestion_logger)
-                        processed_count += 1
-    
+                        # Set timeline extraction flag based on defer_timeline option
+                        config.timeline.AUTO_EXTRACT = not defer_timeline
+                        
+                        # Process the PDF but defer saving chunks to database for batch processing
+                        chunks = process_pdf(pdf_path, progress, task_id, project_name, matter.id, ingestion_logger,
+                                           collect_chunks=True, defer_saving=True)
+                        
                         # Mark as completed for resume functionality
                         with open(resume_log_path, "a") as f:
                             f.write(f"{pdf_path.absolute()}\n")
-    
+                            
+                        return (pdf_path, True, None, chunks)  # Success with chunks
                     except Exception as e:
-                        console.log(f"[bold red]Error processing {pdf_path}: {str(e)}")
+                        error_msg = str(e)
+                        console.log(f"[bold red]Error processing {pdf_path}: {error_msg}")
                         
                         # Log the error in the ingestion logger
                         if ingestion_logger:
-                            ingestion_logger.log_error(pdf_path, "batch_processing_error", str(e))
+                            ingestion_logger.log_error(pdf_path, "batch_processing_error", error_msg)
                             
-                        error_count += 1
-                        if not resume_on_error:
-                            console.log(
-                                "[bold red]Aborting due to error (resume_on_error=False)"
-                            )
-                            raise e
+                        return (pdf_path, False, error_msg, [])  # Error with empty chunks
+                
+                # Use ThreadPoolExecutor for parallel processing
+                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    # Submit all PDFs in the batch for processing
+                    future_to_pdf = {
+                        executor.submit(process_pdf_wrapper, pdf_path, task_id): pdf_path
+                        for pdf_path, task_id in pdf_tasks.items()
+                    }
+                    
+                    # Process results as they complete
+                    all_chunks = []
+                    
+                    for future in concurrent.futures.as_completed(future_to_pdf):
+                        pdf_path = future_to_pdf[future]
+                        try:
+                            result = future.result()
+                            # Check the number of elements in the result tuple
+                            # (backwards compatibility with older versions)
+                            if len(result) == 4:
+                                pdf_path, success, error_msg, chunks = result
+                            else:
+                                pdf_path, success, error_msg = result
+                                chunks = []
+                                
+                            if success:
+                                processed_count += 1
+                                batch_results.append(pdf_path)
+                                if chunks:
+                                    all_chunks.extend(chunks)
+                            else:
+                                error_count += 1
+                                batch_errors.append((pdf_path, error_msg))
+                        except Exception as e:
+                            console.log(f"[bold red]Unexpected error processing {pdf_path}: {str(e)}")
+                            error_count += 1
+                            batch_errors.append((pdf_path, str(e)))
+                    
+                    # Batch save all chunks for better performance
+                    if all_chunks:
+                        from .database import bulk_save_page_chunks
+                        console.log(f"[green]Batch saving {len(all_chunks)} chunks to database")
+                        try:
+                            bulk_save_page_chunks(all_chunks)
+                        except Exception as e:
+                            console.log(f"[bold red]Error in bulk saving chunks: {str(e)}. Falling back to individual saves.")
+                            # Fall back to individual saves as a last resort
+                            for chunk in all_chunks:
+                                try:
+                                    save_page_chunk(chunk)
+                                except Exception as chunk_e:
+                                    console.log(f"[red]Error saving chunk: {str(chunk_e)}")
+                
+                # Check for errors and abort if needed
+                if batch_errors and not resume_on_error:
+                    console.log("[bold red]Aborting due to errors (resume_on_error=False)")
+                    pdf_path, error_msg = batch_errors[0]  # Get the first error
+                    raise Exception(f"Error processing {pdf_path}: {error_msg}")
     
                 # Update overall progress after each batch
                 progress.update(
@@ -1166,6 +1391,28 @@ def ingest_pdfs(
                     advance=len(batch),
                     description=f"Completed {processed_count}/{total_pdfs} ({error_count} errors)",
                 )
+                
+                # Free up resources after each batch
+                import gc
+                gc.collect()
+            
+            # Perform deferred timeline extraction if requested
+            if defer_timeline and processed_count > 0:
+                console.log("[bold blue]Performing deferred timeline extraction...")
+                from .timeline import extract_events_from_all_documents
+                
+                # Add a timeline extraction task
+                timeline_task = progress.add_task("Extracting timeline events", total=1)
+                
+                # Extract timeline events
+                try:
+                    num_events = extract_events_from_all_documents(matter.id, progress)
+                    progress.update(timeline_task, advance=1, description=f"Extracted {num_events} timeline events")
+                    console.log(f"[bold green]Timeline extraction complete: {num_events} events extracted")
+                except Exception as e:
+                    console.log(f"[bold red]Error during timeline extraction: {str(e)}")
+                    if ingestion_logger:
+                        ingestion_logger.log_error("timeline_extraction", "extraction_error", str(e))
         
         # End the logging session and get summary
         if ingestion_logger:

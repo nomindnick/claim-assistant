@@ -273,6 +273,178 @@ def save_page_chunk(chunk_data: Dict[str, Any]) -> None:
         session.commit()
 
 
+def bulk_save_page_chunks(chunk_data_list: List[Dict[str, Any]], batch_size: int = 50) -> None:
+    """Save multiple page chunks to the database efficiently using bulk operations.
+    
+    This optimized method processes chunks in batches with transaction batching
+    to significantly speed up database operations.
+    
+    Args:
+        chunk_data_list: List of chunk data dictionaries
+        batch_size: Number of chunks to process in each transaction
+    """
+    if not chunk_data_list:
+        return
+    
+    # Group chunks by document to optimize document/page creation
+    from collections import defaultdict
+    chunks_by_file_path = defaultdict(list)
+    for chunk_data in chunk_data_list:
+        file_path = chunk_data.get("file_path")
+        if file_path:
+            chunks_by_file_path[file_path].append(chunk_data.copy())
+    
+    with get_session() as session:
+        # Create a single transaction for better performance
+        with session.begin():
+            # Process each document's chunks
+            for file_path, document_chunks in chunks_by_file_path.items():
+                # Get or create the document once for all its chunks
+                document = session.query(Document).filter(Document.file_path == file_path).first()
+                
+                if not document:
+                    # Create new document from first chunk
+                    first_chunk = document_chunks[0]
+                    
+                    # Extract necessary document data
+                    file_name = first_chunk.pop("file_name", os.path.basename(file_path))
+                    project_name = first_chunk.get("project_name")
+                    document_type = first_chunk.get("chunk_type")
+                    document_id = first_chunk.get("doc_id")
+                    doc_date = first_chunk.get("doc_date")
+                    parties_involved = first_chunk.get("parties_involved")
+                    matter_id = first_chunk.get("matter_id")
+                    
+                    if not matter_id:
+                        raise ValueError("matter_id is required for document creation")
+                    
+                    document = Document(
+                        file_path=file_path,
+                        file_name=file_name,
+                        project_name=project_name,
+                        document_type=document_type,
+                        document_id=document_id,
+                        document_date=doc_date,
+                        parties_involved=parties_involved,
+                        matter_id=matter_id,
+                    )
+                    session.add(document)
+                    session.flush()  # Get the document ID
+                
+                # Group chunks by page hash
+                chunks_by_page_hash = defaultdict(list)
+                for chunk_data in document_chunks:
+                    page_hash = chunk_data.get("page_hash")
+                    if page_hash:
+                        chunks_by_page_hash[page_hash].append(chunk_data)
+                
+                # Process pages by hash
+                for page_hash, page_chunks in chunks_by_page_hash.items():
+                    # Get or create the page
+                    page = session.query(Page).filter(Page.page_hash == page_hash).first()
+                    
+                    if not page:
+                        # Create new page from first chunk
+                        first_chunk = page_chunks[0]
+                        
+                        # Extract page data
+                        page_num = first_chunk.get("page_num")
+                        image_path = first_chunk.get("image_path")
+                        thumbnail_path = first_chunk.get("thumbnail_path")
+                        
+                        page = Page(
+                            document_id=document.id,
+                            page_num=page_num,
+                            page_hash=page_hash,
+                            image_path=image_path,
+                            thumbnail_path=thumbnail_path,
+                        )
+                        session.add(page)
+                        session.flush()  # Get the page ID
+                    
+                    # Prepare all chunks for bulk insertion
+                    page_chunk_objects = []
+                    faiss_mappings = []
+                    
+                    for chunk_data in page_chunks:
+                        # Make a copy to avoid modifying the original
+                        chunk_data = chunk_data.copy()
+                        
+                        # Remove document/page specific fields
+                        chunk_data.pop("file_path", None)
+                        chunk_data.pop("file_name", None)
+                        chunk_data.pop("page_num", None)
+                        chunk_data.pop("page_hash", None)
+                        chunk_data.pop("image_path", None)
+                        chunk_data.pop("thumbnail_path", None)
+                        
+                        # Create chunk object
+                        chunk = PageChunk(
+                            page_id=page.id,
+                            **{k: v for k, v in chunk_data.items() if hasattr(PageChunk, k)}
+                        )
+                        page_chunk_objects.append(chunk)
+                        
+                        # Track FAISS ID for mapping
+                        faiss_id = chunk_data.get("faiss_id")
+                        if faiss_id is not None:
+                            faiss_mappings.append((faiss_id, None))  # Will update with chunk ID later
+                    
+                    # Bulk insert chunks in this batch
+                    session.bulk_save_objects(page_chunk_objects)
+                    session.flush()
+                    
+                    # Update FAISS mappings with chunk IDs
+                    for i, chunk in enumerate(page_chunk_objects):
+                        if i < len(faiss_mappings):
+                            faiss_id, _ = faiss_mappings[i]
+                            faiss_mappings[i] = (faiss_id, chunk.id)
+                    
+                    # Save FAISS mappings (if any)
+                    if faiss_mappings:
+                        bulk_save_faiss_id_mappings(faiss_mappings)
+
+
+def bulk_save_faiss_id_mappings(mappings: List[Tuple[int, int]]) -> None:
+    """Save multiple FAISS ID to chunk ID mappings in a single transaction.
+    
+    Args:
+        mappings: List of (faiss_id, chunk_id) tuples
+    """
+    if not mappings:
+        return
+    
+    import json
+    
+    # Get existing mappings
+    config = get_config()
+    mapping_path = Path(config.paths.INDEX_DIR) / "id_mapping.json"
+    
+    try:
+        if mapping_path.exists():
+            with open(mapping_path, "r") as f:
+                id_mapping = json.load(f)
+        else:
+            id_mapping = {}
+    except Exception as e:
+        from .utils import console
+        console.log(f"[bold red]Error loading FAISS ID mapping: {e}")
+        id_mapping = {}
+    
+    # Update mappings
+    for faiss_id, chunk_id in mappings:
+        if chunk_id is not None:
+            id_mapping[str(faiss_id)] = chunk_id
+    
+    # Save updated mappings
+    try:
+        with open(mapping_path, "w") as f:
+            json.dump(id_mapping, f)
+    except Exception as e:
+        from .utils import console
+        console.log(f"[bold red]Error saving FAISS ID mapping: {e}")
+
+
 def save_faiss_id_mapping(chunk_id: str, faiss_id: int) -> None:
     """Save the mapping between chunk_id and FAISS vector ID."""
     with get_session() as session:

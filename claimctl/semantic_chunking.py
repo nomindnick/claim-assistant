@@ -291,6 +291,7 @@ def create_adaptive_chunks(
     chunk_size: Optional[int] = None,
     chunk_overlap: Optional[int] = None,
     progress: Optional[Progress] = None,
+    max_detection_sample: int = 5000,  # Maximum text sample size for structure detection
 ) -> List[str]:
     """Create chunks adaptively based on document structure detection.
     
@@ -299,6 +300,7 @@ def create_adaptive_chunks(
         chunk_size: Maximum chunk size (default from config)
         chunk_overlap: Chunk overlap size (default from config)
         progress: Optional progress bar
+        max_detection_sample: Maximum text sample size for structure detection
         
     Returns:
         List of text chunks
@@ -311,27 +313,61 @@ def create_adaptive_chunks(
     if chunk_overlap is None:
         chunk_overlap = config.chunking.CHUNK_OVERLAP
     
-    # Short text gets a single chunk
+    # Short text gets a single chunk (fast path)
     if len(text) <= chunk_size:
         return [text]
     
-    # For very large texts, use memory-optimized processing
-    if len(text) > 500000:  # 500K characters threshold (about 100 pages)
+    # For very large texts, use memory-optimized processing (fast path)
+    if len(text) > config.chunking.LARGE_DOC_THRESHOLD:  # Use configurable threshold
         console.log(f"[bold yellow]Large document detected ({len(text)} chars). Using memory-optimized processing.")
         return process_large_document(text, chunk_size, chunk_overlap, progress)
     
-    # Detect document structure and get recommended chunking method
-    chunking_method, confidence = detect_document_structure(text)
+    # Fast detection of document structure based on heuristics
+    # This is a simplified version that doesn't rely on API calls for faster processing
+    
+    # Quick structure check using pattern matching
+    section_pattern = re.compile(r'(?:^|\n)(?:Section|§|Article|Chapter)\s+\d+', re.IGNORECASE)
+    numbered_sections = re.compile(r'(?:^|\n)(?:\d+\.)+\s+[A-Z]', re.MULTILINE)
+    contract_patterns = re.compile(r'(?:WHEREAS|AGREEMENT|WITNESSETH|IN WITNESS WHEREOF|PARTY OF THE \w+ PART)', re.IGNORECASE)
+    email_patterns = re.compile(r'(?:From:|To:|Subject:|Cc:|Sent:|@\w+\.\w+)', re.IGNORECASE)
+    table_patterns = re.compile(r'(?:\|\s*\w+\s*\|)|(?:\+[-]+\+)')
+    
+    # Check beginning and end of text for faster pattern matching
+    sample_size = min(len(text), max_detection_sample)
+    text_sample = text[:sample_size//2] + text[-sample_size//2:]
+    
+    # Calculate pattern scores
+    hierarchical_score = len(section_pattern.findall(text_sample)) * 0.5 + len(numbered_sections.findall(text_sample)) * 0.3
+    contract_score = len(contract_patterns.findall(text_sample)) * 0.4
+    email_score = len(email_patterns.findall(text_sample)) * 0.5
+    table_score = len(table_patterns.findall(text_sample)) * 0.3
+    
+    # Combine scores for final determination
+    if hierarchical_score > 1 or contract_score > 1:
+        chunking_method = "hierarchical"
+        confidence = min(0.8, max(0.5, (hierarchical_score + contract_score) / 4))
+    elif email_score > 1 or table_score > 1:
+        chunking_method = "regular"
+        confidence = min(0.8, max(0.5, (email_score + table_score) / 4))
+    else:
+        # Default to semantic for most natural text
+        chunking_method = "semantic"
+        confidence = 0.6
     
     # Log the detected method and confidence
     console.log(f"[bold green]Detected document structure: {chunking_method} (confidence: {confidence:.2f})")
     
     # Apply the recommended chunking method
-    if chunking_method == "hierarchical":
-        return create_hierarchical_chunks(text)
-    elif chunking_method == "semantic":
-        return create_semantic_chunks(text, chunk_size, chunk_overlap)
-    else:  # "regular"
+    try:
+        if chunking_method == "hierarchical":
+            return create_hierarchical_chunks(text)
+        elif chunking_method == "semantic":
+            return create_semantic_chunks(text, chunk_size, chunk_overlap)
+        else:  # "regular"
+            return fallback_chunk_text(text, chunk_size, chunk_overlap)
+    except Exception as e:
+        # Fallback to regular chunking if any chunking method fails
+        console.log(f"[bold yellow]Error in {chunking_method} chunking: {str(e)}. Falling back to regular chunking.")
         return fallback_chunk_text(text, chunk_size, chunk_overlap)
 
 
@@ -339,46 +375,66 @@ def process_large_document(
     text: str,
     chunk_size: int,
     chunk_overlap: int,
-    progress: Optional[Progress] = None
+    progress: Optional[Progress] = None,
+    max_segment_size: int = 150000,  # Increased from 100K to 150K
 ) -> List[str]:
     """Process a large document in streaming fashion to optimize memory usage.
     
-    This function splits the document into manageable segments, processes each
-    segment separately, and then combines the results, all while maintaining
-    reasonable memory usage.
+    This optimized function splits the document into manageable segments, 
+    processes each segment in efficient batches, and combines the results while
+    maintaining low memory usage.
     
     Args:
         text: The large document text
         chunk_size: Maximum chunk size
         chunk_overlap: Chunk overlap size
         progress: Optional progress bar
+        max_segment_size: Maximum size of each segment in characters
         
     Returns:
         List of text chunks from the entire document
     """
+    import gc
+    from concurrent.futures import ThreadPoolExecutor
+    
     # Initial segmentation based on natural boundaries (e.g., pages, sections)
     # This helps avoid cutting in the middle of important content
     segments = []
     
-    # Try to find natural page breaks first
-    page_breaks = re.split(r'\n\s*\n\s*\n', text)  # Split on double newlines
+    # Use a more efficient segmentation strategy
+    # Try to find common document separators like page breaks, sections, or chapters
+    separators = [
+        # Double page breaks (most common in documents)
+        r'\n\s*\n\s*\n',
+        # Section or page markers
+        r'\n\s*[-=_]{3,}\s*\n',
+        r'\n\s*Page \d+\s*\n',
+        # Common section headers
+        r'\n\s*(?:SECTION|Article|CHAPTER)\s+\d+[.:]\s*\n',
+        # Single paragraph breaks (last resort)
+        r'\n\s*\n'
+    ]
     
-    # If we have too few segments, try splitting on single paragraph breaks
-    if len(page_breaks) < 5:
-        segments = re.split(r'\n\s*\n', text)  # Split on paragraph breaks
-    else:
-        segments = page_breaks
+    # Try each separator until we get a reasonable number of segments
+    for separator in separators:
+        segments = re.split(separator, text)
+        if len(segments) >= 5:  # We want at least 5 segments for parallelization
+            break
     
     # If we still don't have enough segments, force split by size
-    if len(segments) < 3:
-        # Calculate a segment size that's large but manageable
-        segment_size = min(100000, len(text) // 5)  # Max 100K or 1/5 of text
-        segments = []
+    if len(segments) < 5:
+        # Calculate an optimal segment size based on document size
+        # Larger documents get larger segments, but capped at max_segment_size
+        total_size = len(text)
+        target_segments = max(5, min(20, total_size // 50000))  # Aim for 5-20 segments
+        segment_size = min(max_segment_size, total_size // target_segments)
         
+        segments = []
         # Split the text into segments with overlap
         for i in range(0, len(text), segment_size - chunk_overlap):
             segment = text[i:i + segment_size]
-            segments.append(segment)
+            if segment.strip():  # Skip empty segments
+                segments.append(segment)
     
     # Log the segmentation strategy
     console.log(f"[green]Segmented document into {len(segments)} parts for memory-efficient processing")
@@ -390,49 +446,72 @@ def process_large_document(
     
     all_chunks = []
     
-    # Process each segment with the appropriate chunking method
-    for i, segment in enumerate(segments):
-        if progress is not None:
-            progress.update(task_id, description=f"Processing segment {i+1}/{len(segments)}")
+    # Define a worker function to process segments in parallel
+    def process_segment(segment_idx):
+        segment = segments[segment_idx]
         
         # Skip empty segments
         if not segment.strip():
-            continue
+            return []
         
-        # For each segment, detect and apply the best chunking method
         try:
-            # Use a simplified detection for segments to save processing time
-            segment_structure, _ = detect_document_structure(segment)
+            # Use simpler fixed chunking method for all segments for speed and consistency
+            # This avoids the overhead of structure detection for each segment
+            segment_chunks = fallback_chunk_text(segment, chunk_size, chunk_overlap)
             
-            # Apply appropriate chunking based on structure
-            if segment_structure == "hierarchical":
-                segment_chunks = create_hierarchical_chunks(segment)
-            elif segment_structure == "semantic":
-                segment_chunks = create_semantic_chunks(segment, chunk_size, chunk_overlap)
-            else:
-                segment_chunks = fallback_chunk_text(segment, chunk_size, chunk_overlap)
-            
-            all_chunks.extend(segment_chunks)
-            
-            # Update progress
+            # Update progress if available
             if progress is not None:
-                progress.update(task_id, advance=1)
-                
+                progress.update(task_id, advance=1, description=f"Processed segment {segment_idx+1}/{len(segments)}")
+            
+            # Run garbage collection after each segment to free memory
+            gc.collect()
+            
+            return segment_chunks
+            
         except Exception as e:
-            logger.error(f"Error processing segment {i}: {str(e)}")
-            # Fallback to simple chunking for this segment
-            fallback_chunks = fallback_chunk_text(segment, chunk_size, chunk_overlap)
-            all_chunks.extend(fallback_chunks)
+            logger.error(f"Error processing segment {segment_idx}: {str(e)}")
+            # Return an empty list or fallback chunking
+            simple_fallback = []
+            try:
+                # Very simple text splitting as a last resort
+                simple_fallback = [segment[i:i+chunk_size] for i in range(0, len(segment), chunk_size-chunk_overlap)]
+            except:
+                pass
             
             # Update progress even on error
             if progress is not None:
                 progress.update(task_id, advance=1)
+                
+            return simple_fallback
+    
+    # Process segments in parallel using ThreadPoolExecutor
+    # Use a reasonable number of workers based on CPU count, but not too many
+    import psutil
+    max_workers = min(len(segments), max(2, psutil.cpu_count(logical=False) or 2))
+    
+    try:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Process all segments in parallel
+            chunk_lists = list(executor.map(process_segment, range(len(segments))))
+            
+            # Combine all results
+            for segment_chunks in chunk_lists:
+                all_chunks.extend(segment_chunks)
+    except Exception as e:
+        console.log(f"[bold red]Error in parallel processing: {str(e)}. Falling back to sequential processing.")
+        # Fall back to sequential processing if parallel fails
+        for i in range(len(segments)):
+            all_chunks.extend(process_segment(i))
     
     # Post-process chunks to eliminate potential near-duplicates from segment overlaps
-    processed_chunks = remove_duplicate_chunks(all_chunks)
-    
-    console.log(f"[green]Completed large document processing: {len(processed_chunks)} chunks created")
-    return processed_chunks
+    # Use an optimized deduplication approach
+    try:
+        processed_chunks = remove_duplicate_chunks(all_chunks)
+        console.log(f"[green]Completed large document processing: {len(processed_chunks)} chunks created from {len(all_chunks)} initial chunks")
+        return processed_chunks
+    except Exception as e:
+        console.log(f"[yellow]Error during chunk deduplication: {str(e)}. Using all chunks.")
+        return all_chunks
 
 
 def remove_duplicate_chunks(chunks: List[str], similarity_threshold: float = 0.8) -> List[str]:
