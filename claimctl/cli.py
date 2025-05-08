@@ -44,6 +44,12 @@ app.add_typer(logs_app, name="logs")
 timeline_app = typer.Typer(help="Generate and manage claim timelines")
 app.add_typer(timeline_app, name="timeline")
 
+financials_app = typer.Typer(help="Manage financial events in timelines")
+timeline_app.add_typer(financials_app, name="financials")
+
+contradictions_app = typer.Typer(help="Manage contradictions in timelines")
+timeline_app.add_typer(contradictions_app, name="contradictions")
+
 
 @app.command("ingest")
 def ingest_command(
@@ -987,6 +993,15 @@ def timeline_show_command(
     format: str = typer.Option(
         "table", "--format", "-f", help="Output format: table or text"
     ),
+    include_financials: bool = typer.Option(
+        True, "--financials/--no-financials", help="Include financial impact summary"
+    ),
+    include_contradictions: bool = typer.Option(
+        True, "--contradictions/--no-contradictions", help="Include contradiction detection"
+    ),
+    detect_new: bool = typer.Option(
+        True, "--detect-new/--no-detect-new", help="Detect new contradictions"
+    ),
 ) -> None:
     """Show timeline for a matter."""
     # Use current matter if not specified
@@ -1043,6 +1058,9 @@ def timeline_show_command(
             date_to=date_to,
             importance_threshold=min_importance,
             confidence_threshold=min_confidence,
+            include_financial_impacts=include_financials,
+            include_contradictions=include_contradictions,
+            detect_new_contradictions=detect_new,
             max_events=max_events,
         )
         
@@ -1084,6 +1102,15 @@ def timeline_export_command(
     ),
     max_events: int = typer.Option(
         100, "--max-events", help="Maximum number of events to show"
+    ),
+    include_financials: bool = typer.Option(
+        True, "--financials/--no-financials", help="Include financial impact summary"
+    ),
+    include_contradictions: bool = typer.Option(
+        True, "--contradictions/--no-contradictions", help="Include contradiction detection"
+    ),
+    detect_new: bool = typer.Option(
+        True, "--detect-new/--no-detect-new", help="Detect new contradictions"
     ),
     open_pdf: bool = typer.Option(
         False, "--open", help="Open the PDF after export"
@@ -1143,6 +1170,9 @@ def timeline_export_command(
             date_to=date_to,
             importance_threshold=min_importance,
             confidence_threshold=min_confidence,
+            include_financial_impacts=include_financials,
+            include_contradictions=include_contradictions,
+            detect_new_contradictions=detect_new,
             max_events=max_events,
         )
         
@@ -1153,6 +1183,8 @@ def timeline_export_command(
             "date_to": to_date,
             "min_importance": min_importance,
             "min_confidence": min_confidence,
+            "include_financials": include_financials,
+            "include_contradictions": include_contradictions,
         }
         
         # Export as PDF
@@ -1181,6 +1213,263 @@ def timeline_export_command(
             
     except Exception as e:
         console.print(f"[bold red]Error exporting timeline: {str(e)}")
+        raise typer.Exit(1)
+
+
+@financials_app.command("summary")
+def financial_summary_command(
+    matter: Optional[str] = typer.Option(
+        None, "--matter", "-m", help="Matter name to show financial summary for"
+    ),
+    from_date: Optional[str] = typer.Option(
+        None, "--from", help="Start date (YYYY-MM-DD)"
+    ),
+    to_date: Optional[str] = typer.Option(
+        None, "--to", help="End date (YYYY-MM-DD)"
+    ),
+    event_type: Optional[List[str]] = typer.Option(
+        None, "--type", "-t", help="Filter by event type(s)"
+    ),
+) -> None:
+    """Show financial summary for a matter."""
+    # Use current matter if not specified
+    if not matter:
+        matter = get_current_matter()
+        if not matter:
+            console.print("[bold yellow]No active matter. Use 'matter switch' or specify --matter")
+            raise typer.Exit(1)
+    
+    # Get matter ID
+    with get_session() as session:
+        matter_obj = session.query(Matter).filter(Matter.name == matter).first()
+        if not matter_obj:
+            console.print(f"[bold red]Matter '{matter}' not found")
+            raise typer.Exit(1)
+        
+        matter_id = matter_obj.id
+    
+    # Parse dates
+    date_from = None
+    date_to = None
+    
+    if from_date:
+        try:
+            date_from = datetime.strptime(from_date, "%Y-%m-%d").date()
+        except ValueError:
+            console.print(f"[bold red]Invalid from date format: {from_date}. Use YYYY-MM-DD")
+            raise typer.Exit(1)
+    
+    if to_date:
+        try:
+            date_to = datetime.strptime(to_date, "%Y-%m-%d").date()
+        except ValueError:
+            console.print(f"[bold red]Invalid to date format: {to_date}. Use YYYY-MM-DD")
+            raise typer.Exit(1)
+    
+    # Validate event types
+    valid_event_types = [e.value for e in EventType]
+    if event_type:
+        for et in event_type:
+            if et not in valid_event_types:
+                console.print(f"[bold red]Invalid event type: {et}")
+                console.print(f"Valid event types: {', '.join(valid_event_types)}")
+                raise typer.Exit(1)
+    
+    # Get financial summary
+    try:
+        console.print(f"[bold green]Getting financial summary for matter '{matter}'...")
+        
+        # Get financial summary
+        from .database import get_financial_summary
+        summary = get_financial_summary(
+            matter_id=matter_id,
+            event_types=event_type,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        
+        # Display summary
+        console.rule("[bold green]Financial Impact Summary")
+        console.print(f"Total Financial Impact: [bold]${summary.get('total_amount', 0):,.2f}[/bold]")
+        console.print(f"Positive Impacts: [green]${summary.get('total_positive', 0):,.2f}[/green]")
+        console.print(f"Negative Impacts: [red]${summary.get('total_negative', 0):,.2f}[/red]")
+        console.print(f"Financial Events: [blue]{summary.get('event_count', 0)}[/blue]")
+        
+        # Display category breakdown
+        if summary.get('event_type_totals'):
+            console.print("\n[bold]Impact by Event Type:[/bold]")
+            for event_type, amount in sorted(summary['event_type_totals'].items(), key=lambda x: abs(x[1]), reverse=True):
+                color = "green" if amount >= 0 else "red"
+                console.print(f"  {event_type}: [{color}]${amount:,.2f}[/{color}]")
+                
+        # Display monthly totals
+        if summary.get('monthly_totals'):
+            console.print("\n[bold]Monthly Financial Impact:[/bold]")
+            for month, amount in sorted(summary['monthly_totals'].items()):
+                year, month_num = month.split('-')
+                month_name = datetime(int(year), int(month_num), 1).strftime("%B %Y")
+                color = "green" if amount >= 0 else "red"
+                console.print(f"  {month_name}: [{color}]${amount:,.2f}[/{color}]")
+        
+    except Exception as e:
+        console.print(f"[bold red]Error generating financial summary: {str(e)}")
+        raise typer.Exit(1)
+
+
+@financials_app.command("update-totals")
+def update_financial_totals_command(
+    matter: Optional[str] = typer.Option(
+        None, "--matter", "-m", help="Matter name to update financial totals for"
+    ),
+) -> None:
+    """Update running totals for financial events."""
+    # Use current matter if not specified
+    if not matter:
+        matter = get_current_matter()
+        if not matter:
+            console.print("[bold yellow]No active matter. Use 'matter switch' or specify --matter")
+            raise typer.Exit(1)
+    
+    # Get matter ID
+    with get_session() as session:
+        matter_obj = session.query(Matter).filter(Matter.name == matter).first()
+        if not matter_obj:
+            console.print(f"[bold red]Matter '{matter}' not found")
+            raise typer.Exit(1)
+        
+        matter_id = matter_obj.id
+    
+    # Update running totals
+    try:
+        console.print(f"[bold green]Updating financial running totals for matter '{matter}'...")
+        
+        # Update running totals
+        from .database import update_running_totals
+        success = update_running_totals(matter_id)
+        
+        if success:
+            console.print("[bold green]Financial running totals updated successfully")
+        else:
+            console.print("[bold red]Error updating financial running totals")
+            raise typer.Exit(1)
+        
+    except Exception as e:
+        console.print(f"[bold red]Error updating financial running totals: {str(e)}")
+        raise typer.Exit(1)
+
+
+@contradictions_app.command("detect")
+def detect_contradictions_command(
+    matter: Optional[str] = typer.Option(
+        None, "--matter", "-m", help="Matter name to detect contradictions for"
+    ),
+    min_confidence: float = typer.Option(
+        0.6, "--min-confidence", help="Minimum confidence threshold for events (0-1)"
+    ),
+    max_days: int = typer.Option(
+        30, "--max-days", help="Maximum difference in days between events to consider them related"
+    ),
+    save: bool = typer.Option(
+        True, "--save/--no-save", help="Save detected contradictions to the database"
+    ),
+) -> None:
+    """Detect contradictions between timeline events."""
+    # Use current matter if not specified
+    if not matter:
+        matter = get_current_matter()
+        if not matter:
+            console.print("[bold yellow]No active matter. Use 'matter switch' or specify --matter")
+            raise typer.Exit(1)
+    
+    # Get matter ID
+    with get_session() as session:
+        matter_obj = session.query(Matter).filter(Matter.name == matter).first()
+        if not matter_obj:
+            console.print(f"[bold red]Matter '{matter}' not found")
+            raise typer.Exit(1)
+        
+        matter_id = matter_obj.id
+    
+    # Detect contradictions
+    try:
+        console.print(f"[bold green]Detecting contradictions for matter '{matter}'...")
+        
+        # Detect contradictions
+        from .database import identify_contradictions, save_contradiction
+        contradictions = identify_contradictions(
+            matter_id=matter_id,
+            min_confidence=min_confidence,
+            max_date_diff_days=max_days,
+        )
+        
+        if not contradictions:
+            console.print("[green]No contradictions detected")
+            return
+        
+        # Display contradictions
+        console.print(f"[bold yellow]Detected {len(contradictions)} contradictions:")
+        
+        for i, contradiction in enumerate(contradictions, 1):
+            event1_date = contradiction.get("event1_date", "Unknown")
+            event2_date = contradiction.get("event2_date", "Unknown")
+            event_type = contradiction.get("event_type", "Unknown")
+            contradiction_type = contradiction.get("contradiction_type", "Unknown")
+            details = contradiction.get("details", "")
+            date_diff = contradiction.get("date_difference_days", 0)
+            
+            panel = Panel(
+                f"Type: {contradiction_type}\nEvents: {event1_date} vs {event2_date} ({date_diff} days)\nDetails: {details}",
+                title=f"Contradiction {i}: {event_type}",
+                border_style="red"
+            )
+            console.print(panel)
+        
+        # Save contradictions if requested
+        if save:
+            saved_count = 0
+            for contradiction in contradictions:
+                if "event1_id" in contradiction and "event2_id" in contradiction:
+                    success = save_contradiction(
+                        event1_id=contradiction["event1_id"],
+                        event2_id=contradiction["event2_id"],
+                        contradiction_details=contradiction["details"],
+                    )
+                    if success:
+                        saved_count += 1
+            
+            console.print(f"[bold green]{saved_count} contradictions saved to the database")
+        
+    except Exception as e:
+        console.print(f"[bold red]Error detecting contradictions: {str(e)}")
+        raise typer.Exit(1)
+
+
+@contradictions_app.command("mark")
+def mark_contradiction_command(
+    event1_id: int = typer.Argument(..., help="ID of the first event"),
+    event2_id: int = typer.Argument(..., help="ID of the second event"),
+    description: str = typer.Argument(..., help="Description of the contradiction"),
+) -> None:
+    """Manually mark a contradiction between two events."""
+    try:
+        console.print(f"[bold green]Marking contradiction between events {event1_id} and {event2_id}...")
+        
+        # Save contradiction
+        from .database import save_contradiction
+        success = save_contradiction(
+            event1_id=event1_id,
+            event2_id=event2_id,
+            contradiction_details=description,
+        )
+        
+        if success:
+            console.print("[bold green]Contradiction marked successfully")
+        else:
+            console.print("[bold red]Error marking contradiction")
+            raise typer.Exit(1)
+        
+    except Exception as e:
+        console.print(f"[bold red]Error marking contradiction: {str(e)}")
         raise typer.Exit(1)
 
 

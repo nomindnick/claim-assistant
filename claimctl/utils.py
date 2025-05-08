@@ -500,8 +500,12 @@ def export_timeline_as_pdf(
             Spacer, 
             Table, 
             TableStyle,
-            PageBreak
+            PageBreak,
+            Image
         )
+        from reportlab.graphics.shapes import Drawing, Line
+        from reportlab.graphics.charts.barcharts import VerticalBarChart
+        from reportlab.graphics.charts.linecharts import HorizontalLineChart
         from reportlab.lib import colors
         
         # Create the Timeline_Exports directory if it doesn't exist
@@ -527,6 +531,7 @@ def export_timeline_as_pdf(
         title_style = styles["Title"]
         heading_style = styles["Heading1"]
         heading2_style = styles["Heading2"]
+        heading3_style = styles["Heading3"]
         normal_style = styles["Normal"]
         
         # Create custom styles
@@ -535,6 +540,28 @@ def export_timeline_as_pdf(
             parent=styles['Heading2'],
             fontSize=14,
             textColor=colors.darkblue
+        )
+        
+        financial_positive_style = ParagraphStyle(
+            'FinancialPositive',
+            parent=styles['Normal'],
+            textColor=colors.green
+        )
+        
+        financial_negative_style = ParagraphStyle(
+            'FinancialNegative',
+            parent=styles['Normal'],
+            textColor=colors.red
+        )
+        
+        contradiction_style = ParagraphStyle(
+            'Contradiction',
+            parent=styles['Normal'],
+            textColor=colors.red,
+            backColor=colors.lightgrey,
+            borderWidth=1,
+            borderColor=colors.red,
+            borderPadding=5
         )
         
         # Create content elements list
@@ -583,6 +610,223 @@ def export_timeline_as_pdf(
         
         elements.append(Spacer(1, 0.25*inch))
         
+        # Add financial summary if available
+        financial_summary = timeline_data.get("financial_summary")
+        if financial_summary:
+            elements.append(Paragraph("Financial Impact Summary", heading_style))
+            
+            # Create financial summary table
+            financial_data = [
+                ["Metric", "Value"],
+                ["Total Financial Impact", f"${financial_summary.get('total_amount', 0):,.2f}"],
+                ["Positive Impacts", f"${financial_summary.get('total_positive', 0):,.2f}"],
+                ["Negative Impacts", f"${financial_summary.get('total_negative', 0):,.2f}"],
+                ["Financial Events", str(financial_summary.get('event_count', 0))],
+            ]
+            
+            financial_table = Table(financial_data, colWidths=[2*inch, 2*inch])
+            financial_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.lightblue),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                # Colorize positive and negative impacts
+                ('TEXTCOLOR', (1, 2), (1, 2), colors.green),  # Positive impacts
+                ('TEXTCOLOR', (1, 3), (1, 3), colors.red),    # Negative impacts
+            ]))
+            
+            elements.append(financial_table)
+            elements.append(Spacer(1, 0.25*inch))
+            
+            # Add breakdown by event type if available
+            if financial_summary.get('event_type_totals'):
+                elements.append(Paragraph("Financial Impact by Event Type", heading3_style))
+                
+                # Create data for event type breakdown
+                event_type_data = [["Event Type", "Amount"]]
+                for event_type, amount in sorted(financial_summary['event_type_totals'].items(), 
+                                               key=lambda x: abs(x[1]), reverse=True):
+                    amount_str = f"${amount:,.2f}"
+                    event_type_data.append([event_type, amount_str])
+                
+                # Create the table
+                event_type_table = Table(event_type_data, colWidths=[2*inch, 2*inch])
+                event_type_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.lightblue),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
+                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                    ('ALIGN', (1, 1), (1, -1), 'RIGHT'),  # Right align amounts
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ]))
+                
+                elements.append(event_type_table)
+                elements.append(Spacer(1, 0.25*inch))
+                
+                # Create a bar chart for financial impact by event type
+                if len(financial_summary['event_type_totals']) > 1:
+                    try:
+                        drawing = Drawing(400, 200)
+                        chart = VerticalBarChart()
+                        chart.x = 50
+                        chart.y = 50
+                        chart.height = 125
+                        chart.width = 300
+                        
+                        # Extract data
+                        data = []
+                        categories = []
+                        amounts = []
+                        
+                        for event_type, amount in sorted(financial_summary['event_type_totals'].items(), 
+                                                      key=lambda x: abs(x[1]), reverse=True)[:5]:  # Limit to top 5
+                            categories.append(event_type)
+                            amounts.append(amount)
+                        
+                        data.append(amounts)
+                        
+                        chart.data = data
+                        chart.categoryAxis.categoryNames = categories
+                        chart.categoryAxis.labels.boxAnchor = 'ne'
+                        chart.categoryAxis.labels.angle = 30
+                        chart.categoryAxis.labels.dx = -8
+                        chart.categoryAxis.labels.dy = -2
+                        
+                        # Set colors
+                        chart.bars[0].fillColor = colors.lightblue
+                        
+                        # Add value labels
+                        chart.barLabels.nudge = 10
+                        chart.barLabelFormat = '${-,.0f}'
+                        chart.barLabels.fontSize = 8
+                        
+                        drawing.add(chart)
+                        elements.append(drawing)
+                        elements.append(Spacer(1, 0.25*inch))
+                    except Exception as chart_error:
+                        # Ignore chart errors - charts are optional
+                        elements.append(Paragraph("Chart generation failed: " + str(chart_error), normal_style))
+                        elements.append(Spacer(1, 0.25*inch))
+            
+            # Add monthly financial chart if available
+            if financial_summary.get('monthly_totals') and len(financial_summary['monthly_totals']) > 1:
+                elements.append(Paragraph("Monthly Financial Impact", heading3_style))
+                
+                # Create data for monthly chart
+                try:
+                    monthly_data = [["Month", "Amount"]]
+                    for month, amount in sorted(financial_summary['monthly_totals'].items()):
+                        year, month_num = month.split('-')
+                        month_name = datetime.date(int(year), int(month_num), 1).strftime("%b %Y")
+                        amount_str = f"${amount:,.2f}"
+                        monthly_data.append([month_name, amount_str])
+                    
+                    # Create the table
+                    monthly_table = Table(monthly_data, colWidths=[2*inch, 2*inch])
+                    monthly_table.setStyle(TableStyle([
+                        ('BACKGROUND', (0, 0), (-1, 0), colors.lightblue),
+                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
+                        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                        ('ALIGN', (1, 1), (1, -1), 'RIGHT'),  # Right align amounts
+                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ]))
+                    
+                    elements.append(monthly_table)
+                    elements.append(Spacer(1, 0.25*inch))
+                    
+                    # Create a line chart for monthly trends
+                    drawing = Drawing(400, 200)
+                    chart = HorizontalLineChart()
+                    chart.x = 50
+                    chart.y = 50
+                    chart.height = 125
+                    chart.width = 300
+                    
+                    # Extract data
+                    data = []
+                    categories = []
+                    amounts = []
+                    
+                    for month, amount in sorted(financial_summary['monthly_totals'].items()):
+                        year, month_num = month.split('-')
+                        month_name = datetime.date(int(year), int(month_num), 1).strftime("%b %y")
+                        categories.append(month_name)
+                        amounts.append(amount)
+                    
+                    data.append(amounts)
+                    
+                    chart.data = data
+                    chart.categoryAxis.categoryNames = categories
+                    chart.categoryAxis.labels.boxAnchor = 'n'
+                    chart.categoryAxis.labels.angle = 30
+                    chart.categoryAxis.labels.dx = 0
+                    chart.categoryAxis.labels.dy = -2
+                    
+                    # Add lines and markers
+                    chart.lines[0].strokeColor = colors.blue
+                    chart.lines[0].strokeWidth = 2
+                    chart.lines[0].symbol = 'FilledCircle'
+                    chart.lines[0].symbolSize = 5
+                    
+                    drawing.add(chart)
+                    elements.append(drawing)
+                    elements.append(Spacer(1, 0.25*inch))
+                except Exception as chart_error:
+                    # Ignore chart errors - charts are optional
+                    pass
+            
+            # Add running total analysis
+            elements.append(Paragraph("Financial Running Total Analysis", heading3_style))
+            elements.append(Paragraph("The financial events create a cumulative impact on the project finances. The running total shows the cumulative financial position over time.", normal_style))
+            elements.append(Spacer(1, 0.25*inch))
+            
+            elements.append(PageBreak())
+        
+        # Add contradiction section if available
+        contradictions = timeline_data.get("contradictions", [])
+        if contradictions:
+            elements.append(Paragraph("Contradictions Analysis", heading_style))
+            elements.append(Paragraph(f"The timeline contains {len(contradictions)} contradictions between events. These contradictions may indicate conflicting information or interpretations.", normal_style))
+            elements.append(Spacer(1, 0.25*inch))
+            
+            # Create contradictions table
+            contradiction_data = [["Type", "Events", "Details"]]
+            
+            for i, contradiction in enumerate(contradictions[:10]):  # Limit to 10 contradictions
+                event1_date = contradiction.get("event1_date", "Unknown")
+                event2_date = contradiction.get("event2_date", "Unknown")
+                event_type = contradiction.get("event_type", "Unknown")
+                details = contradiction.get("details", "")
+                
+                # Format the events dates
+                events_str = f"{event1_date} vs {event2_date}"
+                
+                contradiction_data.append([event_type, events_str, details])
+            
+            contradiction_table = Table(contradiction_data, colWidths=[1*inch, 1.5*inch, 4*inch])
+            contradiction_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.lightpink),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.lightgrey),
+            ]))
+            
+            elements.append(contradiction_table)
+            
+            if len(contradictions) > 10:
+                elements.append(Paragraph(f"Note: {len(contradictions) - 10} additional contradictions not shown.", normal_style))
+            
+            elements.append(Spacer(1, 0.25*inch))
+            elements.append(PageBreak())
+        
         # Add timeline events table
         elements.append(Paragraph("Timeline Events", heading_style))
         elements.append(Spacer(1, 0.15*inch))
@@ -591,8 +835,8 @@ def export_timeline_as_pdf(
         if not events:
             elements.append(Paragraph("No timeline events found.", normal_style))
         else:
-            # Create event table
-            data = [["Date", "Type", "Description", "Document", "Importance"]]
+            # Create event table with financial info and contradiction flags
+            data = [["Date", "Type", "Description", "Financial Impact", "Flags", "Document"]]
             
             # Add each event to the table
             for event in events:
@@ -600,19 +844,32 @@ def export_timeline_as_pdf(
                 event_type = event.get("event_type", "other")
                 description = event.get("description", "")
                 document_name = event.get("document", {}).get("file_name", "Unknown")
-                importance = f"{event.get('importance_score', 0):.2f}"
+                
+                # Format financial impact
+                financial_impact = ""
+                if "financial_impact" in event and event["financial_impact"] is not None:
+                    amount = event["financial_impact"]
+                    if amount >= 0:
+                        financial_impact = f"${amount:,.2f}"
+                    else:
+                        financial_impact = f"(${abs(amount):,.2f})"
+                
+                # Format contradiction flags
+                flags = ""
+                if event.get("has_contradiction", False):
+                    flags = "⚠ Contradiction"
                 
                 data.append([
                     event_date,
                     event_type,
                     description,
-                    document_name,
-                    importance
+                    financial_impact,
+                    flags,
+                    document_name
                 ])
             
-            # Create and style the table
             # Create and style the table with wordwrap for the description column
-            table = Table(data, repeatRows=1, colWidths=[1*inch, 1.2*inch, 3*inch, 1.5*inch, 0.8*inch])
+            table = Table(data, repeatRows=1, colWidths=[0.9*inch, 1*inch, 2.2*inch, 1*inch, 0.9*inch, 1.5*inch])
             table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.lightblue),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
@@ -623,6 +880,8 @@ def export_timeline_as_pdf(
                 ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
                 # Allow wordwrap for the description column
                 ('VALIGN', (2, 1), (2, -1), 'TOP'),
+                # Highlight contradiction flags
+                ('TEXTCOLOR', (4, 1), (4, -1), colors.red),
             ]))
             
             elements.append(table)
@@ -671,8 +930,24 @@ def export_timeline_as_pdf(
                         description = event.get("description", "")
                         document_name = event.get("document", {}).get("file_name", "Unknown")
                         
-                        elements.append(Paragraph(f"{day:02d} {month_name[:3]} - {event_type}", date_style))
+                        # Format header with financial impact if available
+                        header_text = f"{day:02d} {month_name[:3]} - {event_type}"
+                        
+                        elements.append(Paragraph(header_text, date_style))
                         elements.append(Paragraph(description, normal_style))
+                        
+                        # Add financial impact if present
+                        if "financial_impact" in event and event["financial_impact"] is not None:
+                            amount = event["financial_impact"]
+                            if amount >= 0:
+                                elements.append(Paragraph(f"Financial Impact: ${amount:,.2f}", financial_positive_style))
+                            else:
+                                elements.append(Paragraph(f"Financial Impact: (${abs(amount):,.2f})", financial_negative_style))
+                        
+                        # Add contradiction warning if present
+                        if event.get("has_contradiction", False):
+                            elements.append(Paragraph(f"⚠ Contradiction: {event.get('contradiction_details', 'Potential contradiction with another event')}", contradiction_style))
+                        
                         elements.append(Paragraph(f"Document: {document_name}", normal_style))
                         elements.append(Spacer(1, 0.15*inch))
                 
@@ -681,6 +956,14 @@ def export_timeline_as_pdf(
         # Add total count
         elements.append(Spacer(1, 0.5*inch))
         elements.append(Paragraph(f"Total events: {len(events)}", normal_style))
+        
+        # If financial summary is available, add financial event count
+        if financial_summary:
+            elements.append(Paragraph(f"Financial events: {financial_summary.get('event_count', 0)}", normal_style))
+        
+        # If contradictions are available, add contradiction count
+        if contradictions:
+            elements.append(Paragraph(f"Contradictions: {len(contradictions)}", normal_style))
         
         # Build the PDF
         doc.build(elements)
