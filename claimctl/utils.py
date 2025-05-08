@@ -472,3 +472,225 @@ def export_response_as_pdf(
     except Exception as e:
         console.print(f"[bold red]Error exporting response as PDF: {str(e)}")
         return ""
+
+
+def export_timeline_as_pdf(
+    timeline_data: Dict[str, Any],
+    matter_name: str,
+    filters: Dict[str, Any] = None,
+) -> str:
+    """Export a timeline as a PDF.
+    
+    Args:
+        timeline_data: Timeline data from generate_claim_timeline
+        matter_name: Name of the matter
+        filters: Dictionary of filters applied to the timeline
+        
+    Returns:
+        The path to the exported PDF file
+    """
+    try:
+        import datetime
+        from reportlab.lib.pagesizes import letter, landscape
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import inch
+        from reportlab.platypus import (
+            SimpleDocTemplate, 
+            Paragraph, 
+            Spacer, 
+            Table, 
+            TableStyle,
+            PageBreak
+        )
+        from reportlab.lib import colors
+        
+        # Create the Timeline_Exports directory if it doesn't exist
+        exports_dir = Path("./Timeline_Exports")
+        exports_dir.mkdir(exist_ok=True, parents=True)
+        
+        # Create a timestamped filename
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = str(exports_dir / f"timeline_{matter_name}_{timestamp}.pdf")
+        
+        # Create the PDF document
+        doc = SimpleDocTemplate(
+            filename,
+            pagesize=letter,
+            rightMargin=0.5*inch,
+            leftMargin=0.5*inch,
+            topMargin=0.5*inch,
+            bottomMargin=0.5*inch
+        )
+        
+        # Create styles
+        styles = getSampleStyleSheet()
+        title_style = styles["Title"]
+        heading_style = styles["Heading1"]
+        heading2_style = styles["Heading2"]
+        normal_style = styles["Normal"]
+        
+        # Create custom styles
+        date_style = ParagraphStyle(
+            'DateStyle',
+            parent=styles['Heading2'],
+            fontSize=14,
+            textColor=colors.darkblue
+        )
+        
+        # Create content elements list
+        elements = []
+        
+        # Add title
+        elements.append(Paragraph(f"Claim Timeline: {matter_name}", title_style))
+        elements.append(Spacer(1, 0.25*inch))
+        
+        # Add timestamp
+        date_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        elements.append(Paragraph(f"Generated on: {date_str}", normal_style))
+        elements.append(Spacer(1, 0.25*inch))
+        
+        # Add filter information if provided
+        if filters:
+            filter_text = "Filters applied: "
+            filter_parts = []
+            
+            if filters.get("event_types"):
+                filter_parts.append(f"Event types: {', '.join(filters['event_types'])}")
+            if filters.get("date_from"):
+                filter_parts.append(f"From: {filters['date_from']}")
+            if filters.get("date_to"):
+                filter_parts.append(f"To: {filters['date_to']}")
+            if filters.get("min_importance"):
+                filter_parts.append(f"Min importance: {filters['min_importance']}")
+            if filters.get("min_confidence"):
+                filter_parts.append(f"Min confidence: {filters['min_confidence']}")
+                
+            if filter_parts:
+                filter_text += "; ".join(filter_parts)
+                elements.append(Paragraph(filter_text, normal_style))
+                elements.append(Spacer(1, 0.25*inch))
+        
+        # Add summary
+        summary = timeline_data.get("summary", "No timeline summary available.")
+        elements.append(Paragraph("Executive Summary", heading_style))
+        
+        # Split summary into paragraphs
+        summary_paragraphs = summary.split('\n\n')
+        for para in summary_paragraphs:
+            if para.strip():
+                elements.append(Paragraph(para.strip(), normal_style))
+                elements.append(Spacer(1, 0.1*inch))
+        
+        elements.append(Spacer(1, 0.25*inch))
+        
+        # Add timeline events table
+        elements.append(Paragraph("Timeline Events", heading_style))
+        elements.append(Spacer(1, 0.15*inch))
+        
+        events = timeline_data.get("events", [])
+        if not events:
+            elements.append(Paragraph("No timeline events found.", normal_style))
+        else:
+            # Create event table
+            data = [["Date", "Type", "Description", "Document", "Importance"]]
+            
+            # Add each event to the table
+            for event in events:
+                event_date = event.get("event_date", "Unknown")
+                event_type = event.get("event_type", "other")
+                description = event.get("description", "")
+                document_name = event.get("document", {}).get("file_name", "Unknown")
+                importance = f"{event.get('importance_score', 0):.2f}"
+                
+                data.append([
+                    event_date,
+                    event_type,
+                    description,
+                    document_name,
+                    importance
+                ])
+            
+            # Create and style the table
+            # Create and style the table with wordwrap for the description column
+            table = Table(data, repeatRows=1, colWidths=[1*inch, 1.2*inch, 3*inch, 1.5*inch, 0.8*inch])
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.lightblue),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                # Allow wordwrap for the description column
+                ('VALIGN', (2, 1), (2, -1), 'TOP'),
+            ]))
+            
+            elements.append(table)
+            
+        # Add chronological view
+        elements.append(PageBreak())
+        elements.append(Paragraph("Chronological View", heading_style))
+        elements.append(Spacer(1, 0.25*inch))
+        
+        # Group events by year and month
+        events_by_month = timeline_data.get("events_by_month", {})
+        if not events_by_month:
+            elements.append(Paragraph("No timeline events found for chronological view.", normal_style))
+        else:
+            years = {}
+            for event in events:
+                if event.get("event_date"):
+                    date_obj = datetime.datetime.fromisoformat(event["event_date"]).date()
+                    year = date_obj.year
+                    month = date_obj.month
+                    
+                    if year not in years:
+                        years[year] = {}
+                    
+                    if month not in years[year]:
+                        years[year][month] = []
+                    
+                    years[year][month].append(event)
+            
+            # Sort years and months
+            for year in sorted(years.keys()):
+                elements.append(Paragraph(f"{year}", heading_style))
+                elements.append(Spacer(1, 0.15*inch))
+                
+                for month in sorted(years[year].keys()):
+                    month_name = datetime.date(year, month, 1).strftime("%B")
+                    elements.append(Paragraph(f"{month_name}", heading2_style))
+                    elements.append(Spacer(1, 0.1*inch))
+                    
+                    for event in years[year][month]:
+                        date_obj = datetime.datetime.fromisoformat(event["event_date"]).date()
+                        day = date_obj.day
+                        
+                        # Format event details
+                        event_type = event.get("event_type", "other")
+                        description = event.get("description", "")
+                        document_name = event.get("document", {}).get("file_name", "Unknown")
+                        
+                        elements.append(Paragraph(f"{day:02d} {month_name[:3]} - {event_type}", date_style))
+                        elements.append(Paragraph(description, normal_style))
+                        elements.append(Paragraph(f"Document: {document_name}", normal_style))
+                        elements.append(Spacer(1, 0.15*inch))
+                
+                elements.append(Spacer(1, 0.25*inch))
+        
+        # Add total count
+        elements.append(Spacer(1, 0.5*inch))
+        elements.append(Paragraph(f"Total events: {len(events)}", normal_style))
+        
+        # Build the PDF
+        doc.build(elements)
+        
+        return filename
+    
+    except ImportError as e:
+        console.print(f"[bold red]Error: Required PDF export libraries are missing. {str(e)}")
+        console.print("[bold yellow]Try installing with: pip install reportlab")
+        return ""
+    except Exception as e:
+        console.print(f"[bold red]Error exporting timeline as PDF: {str(e)}")
+        return ""

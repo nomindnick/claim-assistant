@@ -22,7 +22,13 @@ from .config import (
 from .database import get_session, Matter, Document, init_database
 from .ingest import ingest_pdfs
 from .query import query_documents
-from .utils import console
+from .timeline import (
+    EventType,
+    generate_claim_timeline,
+    display_timeline,
+    extract_events_from_all_documents
+)
+from .utils import console, export_timeline_as_pdf
 
 # Create Typer app
 app = typer.Typer(
@@ -31,9 +37,12 @@ app = typer.Typer(
     add_completion=False,
 )
 
-# Create a logs subcommand
+# Create subcommands
 logs_app = typer.Typer(help="Manage and analyze ingestion logs")
 app.add_typer(logs_app, name="logs")
+
+timeline_app = typer.Typer(help="Generate and manage claim timelines")
+app.add_typer(timeline_app, name="timeline")
 
 
 @app.command("ingest")
@@ -258,7 +267,7 @@ def clear_command(
         False, "--exhibits", "-x", help="Clear exported exhibits"
     ),
     exports: bool = typer.Option(
-        False, "--exports", "-p", help="Clear exported response PDFs"
+        False, "--exports", "-p", help="Clear exported PDFs (responses and timelines)"
     ),
     resume_log: bool = typer.Option(
         False, "--resume-log", "-r", help="Clear resume log file"
@@ -426,17 +435,32 @@ def clear_command(
     # Clear exports
     if exports:
         try:
-            exports_dir = Path("./Ask_Exports")
-            if exports_dir.exists():
-                exports_count = 0
-                for export_file in exports_dir.glob("*.pdf"):
+            # Clear Ask_Exports directory
+            ask_exports_dir = Path("./Ask_Exports")
+            exports_count = 0
+            if ask_exports_dir.exists():
+                for export_file in ask_exports_dir.glob("*.pdf"):
                     export_file.unlink()
                     exports_count += 1
                 console.print(f"[bold green]Cleared {exports_count} exported response PDFs")
                 deleted_count += exports_count
             else:
                 console.print(
-                    f"[bold yellow]Exports directory not found: {exports_dir}"
+                    f"[bold yellow]Ask_Exports directory not found: {ask_exports_dir}"
+                )
+                
+            # Clear Timeline_Exports directory
+            timeline_exports_dir = Path("./Timeline_Exports")
+            timeline_exports_count = 0
+            if timeline_exports_dir.exists():
+                for export_file in timeline_exports_dir.glob("*.pdf"):
+                    export_file.unlink()
+                    timeline_exports_count += 1
+                console.print(f"[bold green]Cleared {timeline_exports_count} exported timeline PDFs")
+                deleted_count += timeline_exports_count
+            else:
+                console.print(
+                    f"[bold yellow]Timeline_Exports directory not found: {timeline_exports_dir}"
                 )
         except Exception as e:
             console.print(f"[bold red]Error clearing exports: {str(e)}")
@@ -629,7 +653,7 @@ def show_matter_info(name: Optional[str] = None) -> None:
         name = get_current_matter()
         if not name:
             console.print("[bold yellow]No active matter")
-            console.print("Use 'matter switch <name>' to select a matter")
+            console.print("Use 'matter switch <n>' to select a matter")
             return
             
     try:
@@ -889,6 +913,274 @@ def logs_show_command(
         
     except Exception as e:
         console.print(f"[bold red]Error analyzing log file: {str(e)}")
+        raise typer.Exit(1)
+
+
+@timeline_app.command("extract")
+def timeline_extract_command(
+    matter: Optional[str] = typer.Option(
+        None, "--matter", "-m", help="Matter name to extract timeline events for"
+    ),
+) -> None:
+    """Extract timeline events from all documents in a matter."""
+    # Use current matter if not specified
+    if not matter:
+        matter = get_current_matter()
+        if not matter:
+            console.print("[bold yellow]No active matter. Use 'matter switch' or specify --matter")
+            raise typer.Exit(1)
+    
+    # Get matter ID
+    with get_session() as session:
+        matter_obj = session.query(Matter).filter(Matter.name == matter).first()
+        if not matter_obj:
+            console.print(f"[bold red]Matter '{matter}' not found")
+            raise typer.Exit(1)
+        
+        matter_id = matter_obj.id
+    
+    # Confirm extraction
+    confirm = typer.confirm(
+        f"Extract timeline events from all documents in matter '{matter}'? This may take some time.",
+        default=True,
+    )
+    if not confirm:
+        console.print("[bold yellow]Operation cancelled")
+        return
+    
+    # Create progress
+    from rich.progress import Progress
+    with Progress() as progress:
+        # Extract events
+        try:
+            console.print(f"[bold green]Extracting timeline events for matter '{matter}'...")
+            event_count = extract_events_from_all_documents(matter_id, progress)
+            console.print(f"[bold green]Extraction complete. {event_count} events extracted.")
+        except Exception as e:
+            console.print(f"[bold red]Error extracting timeline events: {str(e)}")
+            raise typer.Exit(1)
+
+
+@timeline_app.command("show")
+def timeline_show_command(
+    matter: Optional[str] = typer.Option(
+        None, "--matter", "-m", help="Matter name to show timeline for"
+    ),
+    from_date: Optional[str] = typer.Option(
+        None, "--from", help="Start date (YYYY-MM-DD)"
+    ),
+    to_date: Optional[str] = typer.Option(
+        None, "--to", help="End date (YYYY-MM-DD)"
+    ),
+    event_type: Optional[List[str]] = typer.Option(
+        None, "--type", "-t", help="Filter by event type(s)"
+    ),
+    min_importance: float = typer.Option(
+        0.3, "--min-importance", help="Minimum importance score (0-1)"
+    ),
+    min_confidence: float = typer.Option(
+        0.5, "--min-confidence", help="Minimum confidence score (0-1)"
+    ),
+    max_events: int = typer.Option(
+        100, "--max-events", help="Maximum number of events to show"
+    ),
+    format: str = typer.Option(
+        "table", "--format", "-f", help="Output format: table or text"
+    ),
+) -> None:
+    """Show timeline for a matter."""
+    # Use current matter if not specified
+    if not matter:
+        matter = get_current_matter()
+        if not matter:
+            console.print("[bold yellow]No active matter. Use 'matter switch' or specify --matter")
+            raise typer.Exit(1)
+    
+    # Get matter ID
+    with get_session() as session:
+        matter_obj = session.query(Matter).filter(Matter.name == matter).first()
+        if not matter_obj:
+            console.print(f"[bold red]Matter '{matter}' not found")
+            raise typer.Exit(1)
+        
+        matter_id = matter_obj.id
+    
+    # Parse dates
+    from datetime import datetime
+    date_from = None
+    date_to = None
+    
+    if from_date:
+        try:
+            date_from = datetime.strptime(from_date, "%Y-%m-%d").date()
+        except ValueError:
+            console.print(f"[bold red]Invalid from date format: {from_date}. Use YYYY-MM-DD")
+            raise typer.Exit(1)
+    
+    if to_date:
+        try:
+            date_to = datetime.strptime(to_date, "%Y-%m-%d").date()
+        except ValueError:
+            console.print(f"[bold red]Invalid to date format: {to_date}. Use YYYY-MM-DD")
+            raise typer.Exit(1)
+    
+    # Validate event types
+    valid_event_types = [e.value for e in EventType]
+    if event_type:
+        for et in event_type:
+            if et not in valid_event_types:
+                console.print(f"[bold red]Invalid event type: {et}")
+                console.print(f"Valid event types: {', '.join(valid_event_types)}")
+                raise typer.Exit(1)
+    
+    # Generate timeline
+    try:
+        console.print(f"[bold green]Generating timeline for matter '{matter}'...")
+        timeline_data = generate_claim_timeline(
+            matter_id=matter_id,
+            event_types=event_type,
+            date_from=date_from,
+            date_to=date_to,
+            importance_threshold=min_importance,
+            confidence_threshold=min_confidence,
+            max_events=max_events,
+        )
+        
+        # Display timeline
+        display_timeline(timeline_data, format=format)
+        
+    except Exception as e:
+        console.print(f"[bold red]Error generating timeline: {str(e)}")
+        raise typer.Exit(1)
+
+
+@timeline_app.command("types")
+def timeline_types_command() -> None:
+    """List valid timeline event types."""
+    console.print("[bold blue]Valid Timeline Event Types:")
+    for event_type in EventType:
+        console.print(f"  [green]{event_type.value}[/green]: {event_type.name}")
+
+
+@timeline_app.command("export")
+def timeline_export_command(
+    matter: Optional[str] = typer.Option(
+        None, "--matter", "-m", help="Matter name to export timeline for"
+    ),
+    from_date: Optional[str] = typer.Option(
+        None, "--from", help="Start date (YYYY-MM-DD)"
+    ),
+    to_date: Optional[str] = typer.Option(
+        None, "--to", help="End date (YYYY-MM-DD)"
+    ),
+    event_type: Optional[List[str]] = typer.Option(
+        None, "--type", "-t", help="Filter by event type(s)"
+    ),
+    min_importance: float = typer.Option(
+        0.3, "--min-importance", help="Minimum importance score (0-1)"
+    ),
+    min_confidence: float = typer.Option(
+        0.5, "--min-confidence", help="Minimum confidence score (0-1)"
+    ),
+    max_events: int = typer.Option(
+        100, "--max-events", help="Maximum number of events to show"
+    ),
+    open_pdf: bool = typer.Option(
+        False, "--open", help="Open the PDF after export"
+    ),
+) -> None:
+    """Export timeline as PDF."""
+    # Use current matter if not specified
+    if not matter:
+        matter = get_current_matter()
+        if not matter:
+            console.print("[bold yellow]No active matter. Use 'matter switch' or specify --matter")
+            raise typer.Exit(1)
+    
+    # Get matter ID
+    with get_session() as session:
+        matter_obj = session.query(Matter).filter(Matter.name == matter).first()
+        if not matter_obj:
+            console.print(f"[bold red]Matter '{matter}' not found")
+            raise typer.Exit(1)
+        
+        matter_id = matter_obj.id
+    
+    # Parse dates
+    date_from = None
+    date_to = None
+    
+    if from_date:
+        try:
+            date_from = datetime.strptime(from_date, "%Y-%m-%d").date()
+        except ValueError:
+            console.print(f"[bold red]Invalid from date format: {from_date}. Use YYYY-MM-DD")
+            raise typer.Exit(1)
+    
+    if to_date:
+        try:
+            date_to = datetime.strptime(to_date, "%Y-%m-%d").date()
+        except ValueError:
+            console.print(f"[bold red]Invalid to date format: {to_date}. Use YYYY-MM-DD")
+            raise typer.Exit(1)
+    
+    # Validate event types
+    valid_event_types = [e.value for e in EventType]
+    if event_type:
+        for et in event_type:
+            if et not in valid_event_types:
+                console.print(f"[bold red]Invalid event type: {et}")
+                console.print(f"Valid event types: {', '.join(valid_event_types)}")
+                raise typer.Exit(1)
+    
+    # Generate timeline
+    try:
+        console.print(f"[bold green]Generating timeline for matter '{matter}'...")
+        timeline_data = generate_claim_timeline(
+            matter_id=matter_id,
+            event_types=event_type,
+            date_from=date_from,
+            date_to=date_to,
+            importance_threshold=min_importance,
+            confidence_threshold=min_confidence,
+            max_events=max_events,
+        )
+        
+        # Prepare filters dictionary for PDF metadata
+        filters = {
+            "event_types": event_type,
+            "date_from": from_date,
+            "date_to": to_date,
+            "min_importance": min_importance,
+            "min_confidence": min_confidence,
+        }
+        
+        # Export as PDF
+        console.print("[bold green]Exporting timeline as PDF...")
+        pdf_path = export_timeline_as_pdf(timeline_data, matter, filters)
+        
+        if pdf_path:
+            console.print(f"[bold green]Timeline exported to: [cyan]{pdf_path}[/cyan]")
+            
+            # Open PDF if requested
+            if open_pdf:
+                import subprocess
+                import platform
+                
+                try:
+                    if platform.system() == "Darwin":  # macOS
+                        subprocess.run(["open", pdf_path], check=True)
+                    elif platform.system() == "Windows":
+                        subprocess.run(["start", pdf_path], shell=True, check=True)
+                    else:  # Linux
+                        subprocess.run(["xdg-open", pdf_path], check=True)
+                except Exception as e:
+                    console.print(f"[bold yellow]Could not open PDF: {str(e)}")
+        else:
+            console.print("[bold red]Failed to export timeline as PDF")
+            
+    except Exception as e:
+        console.print(f"[bold red]Error exporting timeline: {str(e)}")
         raise typer.Exit(1)
 
 

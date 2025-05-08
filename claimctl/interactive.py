@@ -122,6 +122,38 @@ class ClaimAssistantShell:
                     "-m": None,
                 },
             },
+            "timeline": {
+                "extract": {
+                    "--matter": None,
+                    "-m": None,
+                },
+                "show": {
+                    "--matter": None,
+                    "-m": None,
+                    "--from": None,
+                    "--to": None,
+                    "--type": None,
+                    "-t": None,
+                    "--min-importance": None,
+                    "--min-confidence": None,
+                    "--max-events": None,
+                    "--format": None,
+                    "-f": None,
+                },
+                "export": {
+                    "--matter": None,
+                    "-m": None,
+                    "--from": None,
+                    "--to": None,
+                    "--type": None,
+                    "-t": None,
+                    "--min-importance": None,
+                    "--min-confidence": None,
+                    "--max-events": None,
+                    "--open": None,
+                },
+                "types": None,
+            },
             "config": {
                 "show": None,
                 "init": None,
@@ -265,6 +297,10 @@ class ClaimAssistantShell:
                 "matter delete <name>   - Delete a matter\n"
                 "logs list              - List recent ingestion logs\n"
                 "logs show [log_file]   - Show ingestion log summary\n"
+                "timeline extract       - Extract timeline events from documents\n"
+                "timeline show          - Display timeline of claim events\n"
+                "timeline export        - Export timeline as PDF\n"
+                "timeline types         - List valid timeline event types\n"
                 "config show            - Show current configuration\n"
                 "clear --all            - Clear all data\n"
                 "help                   - Show this help message\n"
