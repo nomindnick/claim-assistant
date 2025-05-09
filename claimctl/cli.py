@@ -1236,15 +1236,15 @@ def timeline_export_command(
         
         # Prepare filters dictionary for PDF metadata
         filters = {
-            "event_types": event_type,
-            "date_from": from_date,
-            "date_to": to_date,
+            "event_types": event_type if event_type else [],
+            "date_from": str(from_date) if from_date else None,
+            "date_to": str(to_date) if to_date else None,
             "min_importance": min_importance,
             "min_confidence": min_confidence,
             "include_financials": include_financials,
             "include_contradictions": include_contradictions,
         }
-        
+
         # Export as PDF
         console.print("[bold green]Exporting timeline as PDF...")
         pdf_path = export_timeline_as_pdf(timeline_data, matter, filters)

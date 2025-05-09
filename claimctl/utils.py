@@ -580,18 +580,18 @@ def export_timeline_as_pdf(
         if filters:
             filter_text = "Filters applied: "
             filter_parts = []
-            
-            if filters.get("event_types"):
+
+            if filters.get("event_types") and len(filters["event_types"]) > 0:
                 filter_parts.append(f"Event types: {', '.join(filters['event_types'])}")
             if filters.get("date_from"):
                 filter_parts.append(f"From: {filters['date_from']}")
             if filters.get("date_to"):
                 filter_parts.append(f"To: {filters['date_to']}")
-            if filters.get("min_importance"):
+            if filters.get("min_importance") is not None:
                 filter_parts.append(f"Min importance: {filters['min_importance']}")
-            if filters.get("min_confidence"):
+            if filters.get("min_confidence") is not None:
                 filter_parts.append(f"Min confidence: {filters['min_confidence']}")
-                
+
             if filter_parts:
                 filter_text += "; ".join(filter_parts)
                 elements.append(Paragraph(filter_text, normal_style))
@@ -698,10 +698,8 @@ def export_timeline_as_pdf(
                         # Set colors
                         chart.bars[0].fillColor = colors.lightblue
                         
-                        # Add value labels
-                        chart.barLabels.nudge = 10
-                        chart.barLabelFormat = '${-,.0f}'
-                        chart.barLabels.fontSize = 8
+                        # Disable value labels to avoid formatting errors
+                        chart.barLabels = None
                         
                         drawing.add(chart)
                         elements.append(drawing)
@@ -975,5 +973,8 @@ def export_timeline_as_pdf(
         console.print("[bold yellow]Try installing with: pip install reportlab")
         return ""
     except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
         console.print(f"[bold red]Error exporting timeline as PDF: {str(e)}")
+        console.print(f"[bold red]Traceback: {error_details}")
         return ""
