@@ -432,6 +432,17 @@ def extract_timeline_events(
                 contradiction_details = contra_data.get("description", "")
             
             # Create timeline event record
+            # Convert list fields to strings to fix SQLite compatibility
+            referenced_docs = event_data.get("referenced_documents", "")
+            involved_parties = event_data.get("involved_parties", "")
+
+            # Convert lists to strings if needed
+            if isinstance(referenced_docs, list):
+                referenced_docs = ", ".join(referenced_docs)
+
+            if isinstance(involved_parties, list):
+                involved_parties = ", ".join(involved_parties)
+
             timeline_event = {
                 "matter_id": matter_id,
                 "chunk_id": chunk.get("id"),
@@ -441,8 +452,8 @@ def extract_timeline_events(
                 "description": event_data.get("description", ""),
                 "importance_score": float(event_data.get("importance_score", 0.5)),
                 "confidence": float(event_data.get("confidence", 0.5)),
-                "referenced_documents": event_data.get("referenced_documents", ""),
-                "involved_parties": event_data.get("involved_parties", ""),
+                "referenced_documents": referenced_docs,
+                "involved_parties": involved_parties,
                 "has_contradiction": has_contradiction,
                 "contradiction_details": contradiction_details,
                 "financial_impact": financial_impact,
