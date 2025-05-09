@@ -78,8 +78,8 @@ def get_embeddings(text_segments: List[str], config: Dict[str, Any]) -> np.ndarr
     # Placeholder implementation - replace with actual embedding generation
     # This simulates embedding generation for demonstration purposes
     try:
-        # Try to import and use your existing embedding function
-        from claimctl.search import get_embeddings as system_embeddings
+        # Use the embedding function from ingest.py
+        from claimctl.ingest import get_embeddings as system_embeddings
         return system_embeddings(text_segments)
     except ImportError:
         # Fallback to a very simple mock embedding function for demonstration
@@ -443,9 +443,9 @@ def map_text_positions_to_pages(pdf_path: str, text_positions: List[int]) -> Lis
     Returns:
         List of page numbers corresponding to the text positions
     """
-    doc = fitz.open(pdf_path)
+    doc = fitz.open(str(pdf_path))
     pages = []
-    
+
     # Extract text with character positions from each page
     cumulative_length = 0
     page_boundaries = [0]  # Start with position 0
@@ -494,14 +494,14 @@ def split_pdf_by_boundaries(pdf_path: str,
     os.makedirs(output_dir, exist_ok=True)
     
     # Extract text from PDF for classification and position mapping
-    doc = fitz.open(pdf_path)
+    doc = fitz.open(str(pdf_path))
     full_text = ""
     for page in doc:
         full_text += page.get_text()
     
     # Map text positions to page numbers
     boundary_positions = [b['position'] for b in boundaries]
-    boundary_pages = map_text_positions_to_pages(pdf_path, boundary_positions)
+    boundary_pages = map_text_positions_to_pages(str(pdf_path), boundary_positions)
     
     # Add start of document as first boundary
     document_ranges = [(0, boundary_pages[0])]
@@ -515,7 +515,7 @@ def split_pdf_by_boundaries(pdf_path: str,
     
     # Create output documents
     split_documents = []
-    pdf_name = os.path.basename(pdf_path).replace('.pdf', '')
+    pdf_name = os.path.basename(str(pdf_path)).replace('.pdf', '')
     
     for i, (start_page, end_page) in enumerate(document_ranges):
         # Skip invalid page ranges
@@ -650,7 +650,7 @@ def process_pdf_for_segmentation(pdf_path: str,
     
     # Extract text from PDF
     logger.info(f"Extracting text from {pdf_path}")
-    doc = fitz.open(pdf_path)
+    doc = fitz.open(str(pdf_path))
     text = ""
     for page in doc:
         text += page.get_text()

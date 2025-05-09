@@ -86,6 +86,20 @@ class MatterConfig:
 
 
 @dataclass
+class DocumentSegmentationConfig:
+    """Configuration for document segmentation."""
+
+    ENABLED: bool = True
+    THRESHOLD_MULTIPLIER: float = 1.5
+    MIN_CONFIDENCE: float = 0.3
+    MIN_DOCUMENT_LENGTH: int = 1000
+    MIN_BOUNDARY_DISTANCE: int = 2000
+    PAGES_THRESHOLD: int = 50
+    SIZE_THRESHOLD: int = 10_000_000  # 10MB
+    VISUALIZE: bool = False
+
+
+@dataclass
 class Config:
     """Complete application configuration."""
 
@@ -97,6 +111,7 @@ class Config:
     project: ProjectConfig
     matter: MatterConfig  # Add matter configuration
     timeline: TimelineConfig  # Add timeline configuration
+    document_segmentation: DocumentSegmentationConfig  # Add document segmentation configuration
 
 
 def load_config() -> configparser.ConfigParser:
@@ -271,6 +286,29 @@ def get_config() -> Config:
         EXTRACTION_BATCH_SIZE=config_parser.getint("timeline", "EXTRACTION_BATCH_SIZE", fallback=10),
     )
     
+    # Parse document segmentation config if present
+    if not config_parser.has_section("document_segmentation"):
+        config_parser.add_section("document_segmentation")
+        config_parser.set("document_segmentation", "ENABLED", "True")
+        config_parser.set("document_segmentation", "THRESHOLD_MULTIPLIER", "1.5")
+        config_parser.set("document_segmentation", "MIN_CONFIDENCE", "0.3")
+        config_parser.set("document_segmentation", "MIN_DOCUMENT_LENGTH", "1000")
+        config_parser.set("document_segmentation", "MIN_BOUNDARY_DISTANCE", "2000")
+        config_parser.set("document_segmentation", "PAGES_THRESHOLD", "50")
+        config_parser.set("document_segmentation", "SIZE_THRESHOLD", "10000000")
+        config_parser.set("document_segmentation", "VISUALIZE", "False")
+
+    document_segmentation_config = DocumentSegmentationConfig(
+        ENABLED=config_parser.getboolean("document_segmentation", "ENABLED", fallback=True),
+        THRESHOLD_MULTIPLIER=config_parser.getfloat("document_segmentation", "THRESHOLD_MULTIPLIER", fallback=1.5),
+        MIN_CONFIDENCE=config_parser.getfloat("document_segmentation", "MIN_CONFIDENCE", fallback=0.3),
+        MIN_DOCUMENT_LENGTH=config_parser.getint("document_segmentation", "MIN_DOCUMENT_LENGTH", fallback=1000),
+        MIN_BOUNDARY_DISTANCE=config_parser.getint("document_segmentation", "MIN_BOUNDARY_DISTANCE", fallback=2000),
+        PAGES_THRESHOLD=config_parser.getint("document_segmentation", "PAGES_THRESHOLD", fallback=50),
+        SIZE_THRESHOLD=config_parser.getint("document_segmentation", "SIZE_THRESHOLD", fallback=10000000),
+        VISUALIZE=config_parser.getboolean("document_segmentation", "VISUALIZE", fallback=False)
+    )
+
     return Config(
         paths=paths_config,
         openai=openai_config,
@@ -280,6 +318,7 @@ def get_config() -> Config:
         project=project_config,
         matter=matter_config,
         timeline=timeline_config,
+        document_segmentation=document_segmentation_config
     )
 
 

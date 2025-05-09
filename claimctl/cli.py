@@ -162,9 +162,7 @@ def ingest_command(
             config.timeline.AUTO_EXTRACT = timeline_extract
 
         # Update document segmentation config
-        if 'document_segmentation' not in config:
-            config['document_segmentation'] = {}
-        config['document_segmentation']['ENABLED'] = segment_documents
+        config.document_segmentation.ENABLED = segment_documents
 
         ingest_pdfs(
             expanded_paths,

@@ -1329,9 +1329,9 @@ def ingest_pdfs(
                                 
                                 # Set up output directory for preprocessed files
                                 output_dir = os.path.join(
-                                    config.paths.DATA_DIR, 
-                                    'preprocessed', 
-                                    os.path.basename(pdf_path).split('.')[0]
+                                    config.paths.DATA_DIR,
+                                    'preprocessed',
+                                    os.path.basename(str(pdf_path)).split('.')[0]
                                 )
                                 
                                 # Process the PDF and get paths to split documents

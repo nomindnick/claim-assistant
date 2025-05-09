@@ -36,28 +36,28 @@ def preprocess_pdf(pdf_path: str, output_dir: str, config: Dict[str, Any]) -> Di
     
     # Get document segmentation settings from config
     seg_config = {
-        'SEGMENT_SIZE': config.get('document_segmentation', {}).get('SEGMENT_SIZE', 500),
-        'SEGMENT_STRIDE': config.get('document_segmentation', {}).get('SEGMENT_STRIDE', 100),
-        'THRESHOLD_MULTIPLIER': config.get('document_segmentation', {}).get('THRESHOLD_MULTIPLIER', 1.5),
-        'MIN_CONFIDENCE': config.get('document_segmentation', {}).get('MIN_CONFIDENCE', 0.3),
-        'MIN_DOCUMENT_LENGTH': config.get('document_segmentation', {}).get('MIN_DOCUMENT_LENGTH', 1000),
-        'MIN_BOUNDARY_DISTANCE': config.get('document_segmentation', {}).get('MIN_BOUNDARY_DISTANCE', 2000),
-        'VISUALIZE': config.get('document_segmentation', {}).get('VISUALIZE', False)
+        'SEGMENT_SIZE': 500,  # Default segment size
+        'SEGMENT_STRIDE': 100,  # Default segment stride
+        'THRESHOLD_MULTIPLIER': config.document_segmentation.THRESHOLD_MULTIPLIER,
+        'MIN_CONFIDENCE': config.document_segmentation.MIN_CONFIDENCE,
+        'MIN_DOCUMENT_LENGTH': config.document_segmentation.MIN_DOCUMENT_LENGTH,
+        'MIN_BOUNDARY_DISTANCE': config.document_segmentation.MIN_BOUNDARY_DISTANCE,
+        'VISUALIZE': config.document_segmentation.VISUALIZE
     }
     
     # Process the PDF for segmentation
     logger.info(f"Preprocessing PDF: {pdf_path}")
-    
+
     try:
         # Run document segmentation
         result = process_pdf_for_segmentation(
-            pdf_path=pdf_path,
+            pdf_path=str(pdf_path),
             output_dir=output_dir,
             config=seg_config
         )
         
         # Add file hashes for tracking
-        result['original_pdf_hash'] = calculate_file_hash(pdf_path)
+        result['original_pdf_hash'] = calculate_file_hash(str(pdf_path))
         
         for doc in result['documents']:
             doc['hash'] = calculate_file_hash(doc['path'])
@@ -324,7 +324,7 @@ def process_large_pdf(
         List of paths to the split document PDFs
     """
     # Create output directory with unique name based on PDF filename
-    pdf_basename = os.path.basename(pdf_path).replace('.pdf', '')
+    pdf_basename = os.path.basename(str(pdf_path)).replace('.pdf', '')
     doc_output_dir = os.path.join(output_dir, pdf_basename)
     os.makedirs(doc_output_dir, exist_ok=True)
     
@@ -364,15 +364,15 @@ def should_preprocess_pdf(pdf_path: str, config: Dict[str, Any]) -> bool:
         True if the PDF should be preprocessed, False otherwise
     """
     # Get thresholds from config
-    pages_threshold = config.get('document_segmentation', {}).get('PAGES_THRESHOLD', 50)
-    size_threshold = config.get('document_segmentation', {}).get('SIZE_THRESHOLD', 10_000_000)  # 10MB
+    pages_threshold = config.document_segmentation.PAGES_THRESHOLD
+    size_threshold = config.document_segmentation.SIZE_THRESHOLD
     
     # Check file size
-    file_size = os.path.getsize(pdf_path)
+    file_size = os.path.getsize(str(pdf_path))
     
     # Check number of pages
     try:
-        doc = fitz.open(pdf_path)
+        doc = fitz.open(str(pdf_path))
         num_pages = len(doc)
         doc.close()
     except Exception as e:
