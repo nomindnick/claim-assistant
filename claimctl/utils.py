@@ -701,6 +701,29 @@ def export_timeline_as_pdf(
             allowOrphans=0
         )
 
+        # Add special style for table cells to ensure proper wrapping
+        cell_style = ParagraphStyle(
+            'CellStyle',
+            parent=styles['Normal'],
+            fontSize=8,
+            leading=10,
+            wordWrap='CJK',  # Better word wrapping
+            allowWidows=0,
+            allowOrphans=0
+        )
+
+        # Style for header cells
+        header_style = ParagraphStyle(
+            'HeaderStyle',
+            parent=styles['Normal'],
+            fontSize=9,
+            leading=11,
+            fontName='Helvetica-Bold',
+            wordWrap='CJK',
+            allowWidows=0,
+            allowOrphans=0
+        )
+
         # Create custom styles
         date_style = ParagraphStyle(
             'DateStyle',
@@ -903,6 +926,7 @@ def export_timeline_as_pdf(
                     ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
                     ('GRID', (0, 0), (-1, -1), 1, colors.black),
                     ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('WORDWRAP', (0, 0), (-1, -1), True),  # Enable wordwrap for all columns
                 ]))
 
                 elements.append(event_type_table)
@@ -987,6 +1011,7 @@ def export_timeline_as_pdf(
                         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
                         ('GRID', (0, 0), (-1, -1), 1, colors.black),
                         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                        ('WORDWRAP', (0, 0), (-1, -1), True),  # Enable wordwrap for all columns
                     ]))
 
                     elements.append(monthly_table)
@@ -1062,11 +1087,21 @@ def export_timeline_as_pdf(
                     event_date = event.get("event_date", "Unknown")
                     event_type = event.get("event_type", "Other")
                     description = event.get("description", "")
+
+                    # Create a Paragraph object for the description to enable proper wrapping
+                    description_para = Paragraph(description, cell_style)
+
                     amount_str = f"${amount:,.2f}" if amount >= 0 else f"(${abs(amount):,.2f})"
                     total_str = f"${running_total:,.2f}" if running_total >= 0 else f"(${abs(running_total):,.2f})"
 
+                    # Create paragraph objects for all cells
+                    event_date_para = Paragraph(event_date, cell_style)
+                    event_type_para = Paragraph(event_type, cell_style)
+                    amount_str_para = Paragraph(amount_str, cell_style)
+                    total_str_para = Paragraph(total_str, cell_style)
+
                     running_total_data.append([
-                        event_date, event_type, description, amount_str, total_str
+                        event_date_para, event_type_para, description_para, amount_str_para, total_str_para
                     ])
 
                 # Create running total table
@@ -1080,6 +1115,7 @@ def export_timeline_as_pdf(
                     ('GRID', (0, 0), (-1, -1), 1, colors.black),
                     ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
                     ('VALIGN', (2, 1), (2, -1), 'TOP'),  # Top align descriptions
+                    ('WORDWRAP', (0, 0), (-1, -1), True),  # Enable wordwrap for all columns
                 ]))
 
                 elements.append(running_table)
@@ -1100,7 +1136,12 @@ def export_timeline_as_pdf(
             elements.append(Spacer(1, 0.25*inch))
 
             # Create contradictions table
-            contradiction_data = [["Type", "Events", "Details", "Severity"]]
+            contradiction_data = [[
+                Paragraph("Type", header_style),
+                Paragraph("Events", header_style),
+                Paragraph("Details", header_style),
+                Paragraph("Severity", header_style)
+            ]]
 
             for i, contradiction in enumerate(contradictions):
                 event1_date = contradiction.get("event1_date", "Unknown")
@@ -1108,16 +1149,29 @@ def export_timeline_as_pdf(
                 event_type = contradiction.get("event_type", "Unknown")
                 details = contradiction.get("details", "")
 
-                # Format the events dates
-                events_str = f"{event1_date} vs {event2_date}"
+                # Create a Paragraph object for details to enable proper wrapping
+                details_para = Paragraph(details, cell_style)
+
+                # Format the events dates - shorten to save space
+                events_str = f"{event1_date} vs\n{event2_date}"
 
                 # Estimate severity based on event type and content
                 severity = "High" if "payment" in event_type or "delay" in event_type else "Medium"
 
-                contradiction_data.append([event_type, events_str, details, severity])
+                # Create paragraph objects for all columns
+                event_type_para = Paragraph(event_type, cell_style)
+                events_str_para = Paragraph(events_str, cell_style)
+                severity_para = Paragraph(severity, cell_style)
 
-            # Create and style the table
-            contradiction_table = Table(contradiction_data, colWidths=[1*inch, 1.5*inch, 3*inch, 1*inch])
+                contradiction_data.append([
+                    event_type_para,
+                    events_str_para,
+                    details_para,
+                    severity_para
+                ])
+
+            # Create and style the table with better column widths
+            contradiction_table = Table(contradiction_data, colWidths=[0.8*inch, 1.2*inch, 3.5*inch, 0.7*inch])
             contradiction_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.lightpink),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
@@ -1128,6 +1182,8 @@ def export_timeline_as_pdf(
                 ('BACKGROUND', (0, 1), (-1, -1), colors.lightgrey),
                 # Color-code severity column
                 ('TEXTCOLOR', (3, 1), (3, -1), colors.red),
+                # Enable wordwrap for all columns
+                ('WORDWRAP', (0, 0), (-1, -1), True),
             ]))
 
             elements.append(contradiction_table)
@@ -1154,40 +1210,71 @@ def export_timeline_as_pdf(
             elements.append(Spacer(1, 0.2*inch))
 
             # Create event table with financial info and contradiction flags
-            data = [["Date", "Type", "Description", "Financial Impact", "Flags", "Document"]]
+            data = [[
+                Paragraph("Date", header_style),
+                Paragraph("Type", header_style),
+                Paragraph("Description", header_style),
+                Paragraph("Financial Impact", header_style),
+                Paragraph("Flags", header_style),
+                Paragraph("Document", header_style)
+            ]]
 
             # Add each event to the table
             for event in events:
                 event_date = event.get("event_date", "Unknown")
                 event_type = event.get("event_type", "other")
                 description = event.get("description", "")
-                document_name = event.get("document", {}).get("file_name", "Unknown")
 
-                # Format financial impact
+                # Create a Paragraph object for description to enable proper wrapping
+                description_para = Paragraph(description, cell_style)
+                # Limit document name length to prevent overflow
+                document_name = event.get("document", {}).get("file_name", "Unknown")
+                if len(document_name) > 15:
+                    document_name = document_name[:12] + "..."
+
+                # Format financial impact - use shorter format to save space
                 financial_impact = ""
                 if "financial_impact" in event and event["financial_impact"] is not None:
                     amount = event["financial_impact"]
                     if amount >= 0:
-                        financial_impact = f"${amount:,.2f}"
+                        # Use shorter format for large numbers (K for thousands, M for millions)
+                        if abs(amount) >= 1000000:
+                            financial_impact = f"${amount/1000000:.1f}M"
+                        elif abs(amount) >= 1000:
+                            financial_impact = f"${amount/1000:.1f}K"
+                        else:
+                            financial_impact = f"${amount:,.0f}"
                     else:
-                        financial_impact = f"(${abs(amount):,.2f})"
+                        if abs(amount) >= 1000000:
+                            financial_impact = f"-${abs(amount)/1000000:.1f}M"
+                        elif abs(amount) >= 1000:
+                            financial_impact = f"-${abs(amount)/1000:.1f}K"
+                        else:
+                            financial_impact = f"-${abs(amount):,.0f}"
 
                 # Format contradiction flags
                 flags = ""
                 if event.get("has_contradiction", False):
                     flags = "⚠ Contradiction"
 
+                # Create paragraph objects for all cells
+                event_date_para = Paragraph(event_date, cell_style)
+                event_type_para = Paragraph(event_type, cell_style)
+                financial_impact_para = Paragraph(financial_impact, cell_style)
+                flags_para = Paragraph(flags, cell_style)
+                document_name_para = Paragraph(document_name, cell_style)
+
                 data.append([
-                    event_date,
-                    event_type,
-                    description,
-                    financial_impact,
-                    flags,
-                    document_name
+                    event_date_para,
+                    event_type_para,
+                    description_para,
+                    financial_impact_para,
+                    flags_para,
+                    document_name_para
                 ])
 
             # Create and style the table with wordwrap for the description column
-            table = Table(data, repeatRows=1, colWidths=[0.9*inch, 0.9*inch, 2.2*inch, 1*inch, 0.9*inch, 1.1*inch])
+            table = Table(data, repeatRows=1, colWidths=[0.8*inch, 0.8*inch, 2.4*inch, 0.9*inch, 0.8*inch, 0.8*inch])
             table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.lightblue),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
@@ -1196,8 +1283,9 @@ def export_timeline_as_pdf(
                 ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
                 ('GRID', (0, 0), (-1, -1), 1, colors.black),
                 ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                # Allow wordwrap for the description column
+                # Allow wordwrap for all columns
                 ('VALIGN', (2, 1), (2, -1), 'TOP'),
+                ('WORDWRAP', (0, 0), (-1, -1), True),
                 # Highlight contradiction flags
                 ('TEXTCOLOR', (4, 1), (4, -1), colors.red),
             ]))
@@ -1237,7 +1325,13 @@ def export_timeline_as_pdf(
                     years[year][month].append(event)
 
             # Use a simplified chronological view with a table instead
-            chronological_data = [["Date", "Type", "Description", "Financial Impact", "Document"]]
+            chronological_data = [[
+                Paragraph("Date", header_style),
+                Paragraph("Type", header_style),
+                Paragraph("Description", header_style),
+                Paragraph("Financial Impact", header_style),
+                Paragraph("Document", header_style)
+            ]]
 
             # Sort all events by date
             all_events = []
@@ -1254,31 +1348,57 @@ def export_timeline_as_pdf(
                 event_date = event.get("event_date", "Unknown")
                 event_type = event.get("event_type", "other")
                 description = event.get("description", "")
-                document_name = event.get("document", {}).get("file_name", "Unknown")
 
-                # Format financial impact
+                # Create a Paragraph object for description to enable proper wrapping
+                description_para = Paragraph(description, cell_style)
+                # Limit document name length to prevent overflow
+                document_name = event.get("document", {}).get("file_name", "Unknown")
+                if len(document_name) > 15:
+                    document_name = document_name[:12] + "..."
+
+                # Format financial impact - use shorter format to save space
                 financial_impact = ""
                 if "financial_impact" in event and event["financial_impact"] is not None:
                     amount = event["financial_impact"]
                     if amount >= 0:
-                        financial_impact = f"${amount:,.2f}"
+                        # Use shorter format for large numbers (K for thousands, M for millions)
+                        if abs(amount) >= 1000000:
+                            financial_impact = f"${amount/1000000:.1f}M"
+                        elif abs(amount) >= 1000:
+                            financial_impact = f"${amount/1000:.1f}K"
+                        else:
+                            financial_impact = f"${amount:,.0f}"
                     else:
-                        financial_impact = f"(${abs(amount):,.2f})"
+                        if abs(amount) >= 1000000:
+                            financial_impact = f"-${abs(amount)/1000000:.1f}M"
+                        elif abs(amount) >= 1000:
+                            financial_impact = f"-${abs(amount)/1000:.1f}K"
+                        else:
+                            financial_impact = f"-${abs(amount):,.0f}"
 
                 # Add contradiction marker if present
                 if event.get("has_contradiction", False):
                     description = f"⚠ {description}"
 
+                # Create paragraph object for description
+                description_para = Paragraph(description, cell_style)
+
+                # Create paragraph objects for all cells
+                event_date_para = Paragraph(event_date, cell_style)
+                event_type_para = Paragraph(event_type, cell_style)
+                financial_impact_para = Paragraph(financial_impact, cell_style)
+                document_name_para = Paragraph(document_name, cell_style)
+
                 chronological_data.append([
-                    event_date,
-                    event_type,
-                    description,
-                    financial_impact,
-                    document_name
+                    event_date_para,
+                    event_type_para,
+                    description_para,
+                    financial_impact_para,
+                    document_name_para
                 ])
 
-            # Create and style the table
-            chrono_table = Table(chronological_data, repeatRows=1, colWidths=[1*inch, 0.9*inch, 2.5*inch, 1*inch, 1.1*inch])
+            # Create and style the table with adjusted column widths
+            chrono_table = Table(chronological_data, repeatRows=1, colWidths=[0.9*inch, 0.8*inch, 2.9*inch, 0.9*inch, 0.9*inch])
             chrono_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.lightblue),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
@@ -1286,8 +1406,9 @@ def export_timeline_as_pdf(
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
                 ('GRID', (0, 0), (-1, -1), 1, colors.black),
                 ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                # Allow wordwrap for the description column
+                # Allow wordwrap for all columns
                 ('VALIGN', (2, 1), (2, -1), 'TOP'),
+                ('WORDWRAP', (0, 0), (-1, -1), True),
             ]))
 
             elements.append(chrono_table)
