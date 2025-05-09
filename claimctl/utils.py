@@ -1088,17 +1088,17 @@ def export_timeline_as_pdf(
                     event_type = event.get("event_type", "Other")
                     description = event.get("description", "")
 
-                    # Create a Paragraph object for the description to enable proper wrapping
-                    description_para = Paragraph(description, cell_style)
+                    # Create a Paragraph object for the description to enable proper wrapping (with None check)
+                    description_para = Paragraph(str(description) if description is not None else "", cell_style)
 
                     amount_str = f"${amount:,.2f}" if amount >= 0 else f"(${abs(amount):,.2f})"
                     total_str = f"${running_total:,.2f}" if running_total >= 0 else f"(${abs(running_total):,.2f})"
 
-                    # Create paragraph objects for all cells
-                    event_date_para = Paragraph(event_date, cell_style)
-                    event_type_para = Paragraph(event_type, cell_style)
-                    amount_str_para = Paragraph(amount_str, cell_style)
-                    total_str_para = Paragraph(total_str, cell_style)
+                    # Create paragraph objects for all cells (with None check)
+                    event_date_para = Paragraph(str(event_date) if event_date is not None else "", cell_style)
+                    event_type_para = Paragraph(str(event_type) if event_type is not None else "", cell_style)
+                    amount_str_para = Paragraph(str(amount_str) if amount_str is not None else "", cell_style)
+                    total_str_para = Paragraph(str(total_str) if total_str is not None else "", cell_style)
 
                     running_total_data.append([
                         event_date_para, event_type_para, description_para, amount_str_para, total_str_para
@@ -1149,8 +1149,8 @@ def export_timeline_as_pdf(
                 event_type = contradiction.get("event_type", "Unknown")
                 details = contradiction.get("details", "")
 
-                # Create a Paragraph object for details to enable proper wrapping
-                details_para = Paragraph(details, cell_style)
+                # Create a Paragraph object for details to enable proper wrapping (with None check)
+                details_para = Paragraph(str(details) if details is not None else "", cell_style)
 
                 # Format the events dates - shorten to save space
                 events_str = f"{event1_date} vs\n{event2_date}"
@@ -1158,10 +1158,10 @@ def export_timeline_as_pdf(
                 # Estimate severity based on event type and content
                 severity = "High" if "payment" in event_type or "delay" in event_type else "Medium"
 
-                # Create paragraph objects for all columns
-                event_type_para = Paragraph(event_type, cell_style)
-                events_str_para = Paragraph(events_str, cell_style)
-                severity_para = Paragraph(severity, cell_style)
+                # Create paragraph objects for all columns (with None check)
+                event_type_para = Paragraph(str(event_type) if event_type is not None else "", cell_style)
+                events_str_para = Paragraph(str(events_str) if events_str is not None else "", cell_style)
+                severity_para = Paragraph(str(severity) if severity is not None else "", cell_style)
 
                 contradiction_data.append([
                     event_type_para,
@@ -1225,8 +1225,8 @@ def export_timeline_as_pdf(
                 event_type = event.get("event_type", "other")
                 description = event.get("description", "")
 
-                # Create a Paragraph object for description to enable proper wrapping
-                description_para = Paragraph(description, cell_style)
+                # Create a Paragraph object for description to enable proper wrapping (with None check)
+                description_para = Paragraph(str(description) if description is not None else "", cell_style)
                 # Limit document name length to prevent overflow
                 document_name = event.get("document", {}).get("file_name", "Unknown")
                 if len(document_name) > 15:
@@ -1257,12 +1257,12 @@ def export_timeline_as_pdf(
                 if event.get("has_contradiction", False):
                     flags = "⚠ Contradiction"
 
-                # Create paragraph objects for all cells
-                event_date_para = Paragraph(event_date, cell_style)
-                event_type_para = Paragraph(event_type, cell_style)
-                financial_impact_para = Paragraph(financial_impact, cell_style)
-                flags_para = Paragraph(flags, cell_style)
-                document_name_para = Paragraph(document_name, cell_style)
+                # Create paragraph objects for all cells (with None check)
+                event_date_para = Paragraph(str(event_date) if event_date is not None else "", cell_style)
+                event_type_para = Paragraph(str(event_type) if event_type is not None else "", cell_style)
+                financial_impact_para = Paragraph(str(financial_impact) if financial_impact is not None else "", cell_style)
+                flags_para = Paragraph(str(flags) if flags is not None else "", cell_style)
+                document_name_para = Paragraph(str(document_name) if document_name is not None else "", cell_style)
 
                 data.append([
                     event_date_para,
@@ -1349,8 +1349,8 @@ def export_timeline_as_pdf(
                 event_type = event.get("event_type", "other")
                 description = event.get("description", "")
 
-                # Create a Paragraph object for description to enable proper wrapping
-                description_para = Paragraph(description, cell_style)
+                # Create a Paragraph object for description to enable proper wrapping (with None check)
+                description_para = Paragraph(str(description) if description is not None else "", cell_style)
                 # Limit document name length to prevent overflow
                 document_name = event.get("document", {}).get("file_name", "Unknown")
                 if len(document_name) > 15:
@@ -1383,11 +1383,11 @@ def export_timeline_as_pdf(
                 # Create paragraph object for description
                 description_para = Paragraph(description, cell_style)
 
-                # Create paragraph objects for all cells
-                event_date_para = Paragraph(event_date, cell_style)
-                event_type_para = Paragraph(event_type, cell_style)
-                financial_impact_para = Paragraph(financial_impact, cell_style)
-                document_name_para = Paragraph(document_name, cell_style)
+                # Create paragraph objects for all cells (with None check)
+                event_date_para = Paragraph(str(event_date) if event_date is not None else "", cell_style)
+                event_type_para = Paragraph(str(event_type) if event_type is not None else "", cell_style)
+                financial_impact_para = Paragraph(str(financial_impact) if financial_impact is not None else "", cell_style)
+                document_name_para = Paragraph(str(document_name) if document_name is not None else "", cell_style)
 
                 chronological_data.append([
                     event_date_para,
