@@ -939,12 +939,24 @@ def timeline_extract_command(
     force: bool = typer.Option(
         False, "--force", "-f", help="Force re-extraction of all events"
     ),
+    document_aware: bool = typer.Option(
+        True, "--document-aware/--no-document-aware", help="Process chunks with document context"
+    ),
+    parallel: bool = typer.Option(
+        True, "--parallel/--no-parallel", help="Process documents in parallel"
+    ),
+    workers: int = typer.Option(
+        4, "--workers", "-w", help="Number of parallel worker threads (1-8, default 4)", min=1, max=8
+    ),
 ) -> None:
     """Extract timeline events from all documents in a matter.
     
     By default, the extraction will resume from where it left off if interrupted.
     Use --no-resume to start from the beginning, ignoring previous progress.
     Use --force to delete all existing timeline events and start fresh.
+    Use --document-aware to process chunks with document context (default, recommended).
+    Use --parallel to process documents in parallel for faster extraction (default).
+    Use --workers to specify the number of parallel workers (default 4).
     """
     # Use current matter if not specified
     if not matter:
@@ -971,6 +983,11 @@ def timeline_extract_command(
     else:
         message += " (will start from the beginning)"
     
+    if document_aware:
+        message += " (using document-aware mode)"
+    else:
+        message += " (not using document-aware mode)"
+    
     message += " This may take some time."
     
     # Confirm extraction
@@ -989,7 +1006,10 @@ def timeline_extract_command(
                 matter_id, 
                 progress,
                 resume=not no_resume,
-                force=force
+                force=force,
+                document_aware=document_aware,
+                parallel=parallel,
+                max_workers=workers
             )
             
             # Show appropriate completion message

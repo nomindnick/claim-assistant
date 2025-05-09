@@ -9,13 +9,14 @@ This module provides functionality to:
 """
 
 import re
+import time
 from datetime import datetime, date
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import numpy as np
-from openai import OpenAI
+from openai import OpenAI, OpenAIError, APITimeoutError, RateLimitError
 from rich.console import Console
 from rich.progress import Progress
 from rich.table import Table
@@ -85,17 +86,16 @@ class ContradictionType(str, Enum):
 
 # Event extraction prompt
 TIMELINE_EXTRACTION_PROMPT = """
-You are an expert construction claim timeline analyzer. Analyze this document chunk and determine if it contains significant timeline events related to a construction claim. 
+You are an expert construction claim timeline analyzer. Analyze this document chunk efficiently and determine if it contains significant timeline events related to a construction claim. 
 
-INSTRUCTIONS:
-1. Read the document chunk carefully
-2. Identify if the document contains any significant timeline events
-3. Extract any relevant dates, events, and descriptions
-4. Assign an event type and importance score to each event
-5. Extract financial impact information if present
-6. Identify potential contradictions with other events
-7. Provide a confidence score for your extraction
-8. If no significant timeline events are found, respond with "NO_EVENTS"
+INSTRUCTIONS (PRIORITIZED):
+1. FIRST, quickly scan for dates, monetary amounts, and key terms like "delay," "change order," or "claim"
+2. If none found, immediately respond with "NO_EVENTS" without further analysis
+3. If potential events found, extract relevant dates, descriptions, and event types
+4. Assign event type and importance score only for significant events
+5. Extract financial impact ONLY when explicitly mentioned with amounts
+6. Only look for contradictions when document explicitly references conflicts
+7. Work efficiently - focus on key facts rather than exhaustive analysis
 
 DOCUMENT CHUNK:
 {text}
@@ -106,7 +106,7 @@ Document ID: {doc_id}
 Project: {project_name}
 Page Number: {page_num}
 
-If the chunk contains significant timeline events, format each event using this JSON structure:
+For significant timeline events ONLY, use this JSON structure:
 ```json
 {{
   "event_date": "YYYY-MM-DD", 
@@ -131,15 +131,12 @@ If the chunk contains significant timeline events, format each event using this 
 ```
 
 Financial impact guidelines:
-- Include financial impact information ONLY if explicitly mentioned in the document
-- Extract the exact amount; do not make assumptions
-- Set is_additive to true for costs that increase the project value, false for credits that reduce value
-- Use the appropriate impact_type based on the context
+- Include financial impact information ONLY if explicitly mentioned with a clear amount
+- Set is_additive to true for costs that increase the project value, false for credits
 
 Contradiction detection guidelines:
-- Note potential contradictions only when document explicitly indicates conflict with other documents
-- Focus on contradictions in dates, financial amounts, scope of work, or responsibility assignment
-- Provide specific details about the nature of the contradiction
+- Only include contradictions when document explicitly mentions conflicts
+- Be very selective about marking contradictions
 
 If multiple events are found, return an array of JSON objects.
 If NO significant timeline events are found, respond with exactly: "NO_EVENTS"
@@ -150,6 +147,7 @@ def extract_timeline_events(
     chunk: Dict[str, Any],
     matter_id: int,
     batch_mode: bool = False,
+    document_context: bool = False,
 ) -> List[Dict[str, Any]]:
     """Extract timeline events from a document chunk.
     
@@ -157,6 +155,7 @@ def extract_timeline_events(
         chunk: Document chunk data
         matter_id: ID of the matter
         batch_mode: If True, reduces logging for batch processing
+        document_context: If True, the chunk contains additional document context
         
     Returns:
         List of extracted timeline events
@@ -177,34 +176,153 @@ def extract_timeline_events(
         project_name = chunk.get("project_name", "")
         page_num = chunk.get("page_num", "")
         
-        # Prepare prompt
-        prompt = TIMELINE_EXTRACTION_PROMPT.format(
-            text=chunk_text[:3000],  # Limit text to 3000 chars to stay within token limits
-            chunk_type=chunk_type,
-            doc_date=doc_date,
-            doc_id=doc_id,
-            project_name=project_name,
-            page_num=page_num,
-        )
+        # Prepare prompt with additional context if available
+        if document_context and "enhanced_context" in chunk:
+            # Include enhanced document context in the prompt
+            enhanced_text = f"{chunk_text}\n\n{chunk['enhanced_context']}"
+            
+            # Log the use of enhanced context
+            if not batch_mode:
+                console.log("[green]Using enhanced document context for extraction")
+                
+            prompt = TIMELINE_EXTRACTION_PROMPT.format(
+                text=enhanced_text[:3800],  # Increased limit to include context, still within token limits
+                chunk_type=chunk_type,
+                doc_date=doc_date,
+                doc_id=doc_id,
+                project_name=project_name,
+                page_num=page_num,
+            )
+        else:
+            # Standard prompt without enhanced context
+            prompt = TIMELINE_EXTRACTION_PROMPT.format(
+                text=chunk_text[:3000],  # Limit text to 3000 chars to stay within token limits
+                chunk_type=chunk_type,
+                doc_date=doc_date,
+                doc_id=doc_id,
+                project_name=project_name,
+                page_num=page_num,
+            )
         
-        # Query OpenAI
+        # Log model being used for debugging
+        if not batch_mode:
+            console.log(f"[dim]Using model: {config.openai.MODEL}")
+        
+        # Query OpenAI with retry logic
         client = OpenAI(api_key=config.openai.API_KEY)
-        response = client.chat.completions.create(
-            model=config.openai.MODEL,  # Use the configured model instead of hardcoded value
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a construction claim timeline analyzer that extracts timeline events from documents.",
-                },
-                {
-                    "role": "user",
-                    "content": prompt,
-                },
-            ],
-            response_format={"type": "text"},
-            temperature=0.2,  # Lower temperature for more factual responses
-        )
         
+        # Create log dir for API responses if needed
+        debug_log_dir = Path("./logs/api_debug")
+        debug_log_dir.mkdir(exist_ok=True, parents=True)
+        
+        start_time = datetime.now()
+        api_log_id = f"{start_time.strftime('%Y%m%d_%H%M%S')}_{chunk.get('id')}"
+        
+        # Save request for debugging
+        with open(debug_log_dir / f"request_{api_log_id}.txt", "w") as f:
+            f.write(f"Model: {config.openai.MODEL}\n")
+            f.write(f"Time: {start_time}\n")
+            f.write(f"Chunk ID: {chunk.get('id')}\n")
+            f.write(f"Document Type: {chunk_type}\n")
+            f.write("System message:\n")
+            f.write("You are a construction claim timeline analyzer that extracts timeline events from documents.\n\n")
+            f.write("User message:\n")
+            f.write(prompt)
+        
+        # Retry parameters
+        max_retries = 3
+        retry_delay = 2  # seconds
+        attempts = 0
+        response = None
+        
+        try:
+            # Retry loop for API calls
+            while attempts < max_retries:
+                attempts += 1
+                try:
+                    # Log request for debugging
+                    if not batch_mode:
+                        if attempts > 1:
+                            console.log(f"[dim]Retry {attempts}/{max_retries} for chunk {chunk.get('id')}")
+                        else:
+                            console.log(f"[dim]Making API request for chunk {chunk.get('id')}")
+                    
+                    # Make API call
+                    response = client.chat.completions.create(
+                        model=config.openai.MODEL,  # Use the configured model instead of hardcoded value
+                        reasoning_effort="low",  # Using low effort for timeline extraction to improve speed
+                        messages=[
+                            {
+                                "role": "system",
+                                "content": "You are a construction claim timeline analyzer that extracts timeline events from documents.",
+                            },
+                            {
+                                "role": "user",
+                                "content": prompt,
+                            },
+                        ],
+                        response_format={"type": "text"}
+                        # Removed temperature parameter as it's causing API errors with o4-mini
+                    )
+                    
+                    # If we get here, the call succeeded
+                    break
+                    
+                except (RateLimitError, APITimeoutError) as e:
+                    # These errors are worth retrying with backoff
+                    if attempts < max_retries:
+                        wait_time = retry_delay * (2 ** (attempts - 1))  # Exponential backoff
+                        console.log(f"[yellow]API rate limit or timeout error, retrying in {wait_time}s ({attempts}/{max_retries}): {str(e)}")
+                        time.sleep(wait_time)
+                    else:
+                        # We've used all our retries, re-raise
+                        raise
+                        
+                except Exception as e:
+                    # Don't retry other types of errors
+                    raise
+            
+            # Make sure we got a response
+            if response is None:
+                raise Exception("Failed to get response after retries")
+                
+            # Log API response time
+            end_time = datetime.now()
+            duration = (end_time - start_time).total_seconds()
+            
+            # Save successful response for debugging
+            result = response.choices[0].message.content.strip()
+            with open(debug_log_dir / f"response_{api_log_id}.txt", "w") as f:
+                f.write(f"Duration: {duration:.2f}s\n")
+                f.write(f"Attempts: {attempts}/{max_retries}\n")
+                f.write("Response:\n")
+                f.write(result)
+                
+            if not batch_mode:
+                console.log(f"[dim]API response received in {duration:.2f}s after {attempts} attempt(s)")
+                
+        except Exception as api_error:
+            # Log API error for debugging
+            error_msg = f"API Error: {str(api_error)}"
+            
+            # Save error response
+            with open(debug_log_dir / f"error_{api_log_id}.txt", "w") as f:
+                f.write(f"Duration: {(datetime.now() - start_time).total_seconds():.2f}s\n")
+                f.write(f"Attempts: {attempts}/{max_retries}\n")
+                f.write("Error:\n")
+                f.write(error_msg)
+                f.write("\n\nChunk info:\n")
+                f.write(f"Document: {chunk.get('file_name', 'Unknown')}\n")
+                f.write(f"Page: {chunk.get('page_num', 'Unknown')}\n")
+                f.write(f"Type: {chunk_type}\n")
+            
+            # Always print API errors to console for visibility regardless of batch mode
+            console.log(f"[bold red]{error_msg}")
+            console.log(f"[red]Document: {chunk.get('file_name', 'Unknown')}, Page: {chunk.get('page_num', 'Unknown')}")
+            
+            raise Exception(error_msg)
+        
+        # Process the content from the response
         result = response.choices[0].message.content.strip()
         
         # Check if no events were found
@@ -396,25 +514,87 @@ def batch_extract_timeline_events(
         List of extracted timeline events
     """
     all_events = []
+    error_count = 0
     
     # Create a task in the progress bar if provided
     task_id = None
     if progress is not None:
         task_id = progress.add_task("Extracting timeline events", total=len(chunks))
     
+    # Get matter log directory for additional logging
+    with get_session() as session:
+        matter = session.query(Matter).filter(Matter.id == matter_id).first()
+        if matter:
+            matter_dir = Path(matter.data_directory).parent
+            logs_dir = matter_dir / "logs"
+            logs_dir.mkdir(exist_ok=True, parents=True)
+            batch_log_path = logs_dir / "batch_timeline_extract.log"
+            
+            # Initialize batch log
+            with open(batch_log_path, "a") as log:
+                log.write(f"\n--- Batch extraction starting at {datetime.now()} ---\n")
+                log.write(f"Processing {len(chunks)} chunks with model: {get_config().openai.MODEL}\n")
+    
     # Process each chunk
+    config = get_config()
+    console.log(f"[bold blue]Timeline extraction using model: {config.openai.MODEL}")
+    
     for i, chunk in enumerate(chunks):
         # Update progress
         if progress is not None:
             progress.update(task_id, advance=0, description=f"Processing chunk {i+1}/{len(chunks)}")
         
-        # Extract timeline events
-        events = extract_timeline_events(chunk, matter_id, batch_mode=True)
-        all_events.extend(events)
+        # Extract detailed chunk info for logging
+        chunk_info = f"Chunk {i+1}/{len(chunks)} - ID: {chunk.get('id')}, Type: {chunk.get('chunk_type')}"
+        if matter:
+            with open(batch_log_path, "a") as log:
+                log.write(f"\nProcessing {chunk_info} - {datetime.now()}\n")
+        
+        try:
+            # Extract timeline events
+            start_time = datetime.now()
+            events = extract_timeline_events(chunk, matter_id, batch_mode=True)
+            end_time = datetime.now()
+            duration = (end_time - start_time).total_seconds()
+            
+            all_events.extend(events)
+            
+            # Log results
+            if matter:
+                with open(batch_log_path, "a") as log:
+                    log.write(f"  Completed in {duration:.2f}s - Found {len(events)} events\n")
+            
+            # Print periodic status updates
+            if (i+1) % 10 == 0 or i == 0 or i == len(chunks)-1:
+                console.log(f"[green]Processed {i+1}/{len(chunks)} chunks - Found {len(all_events)} events so far")
+                
+        except Exception as e:
+            error_count += 1
+            error_message = f"Error processing {chunk_info}: {str(e)}"
+            
+            # Always log errors to console regardless of batch mode
+            console.log(f"[bold red]{error_message}")
+            
+            # Print more details to make debugging easier
+            console.log(f"[red]Document: {chunk.get('file_name', 'Unknown')}, Page: {chunk.get('page_num', 'Unknown')}")
+            
+            if matter:
+                with open(batch_log_path, "a") as log:
+                    log.write(f"  ERROR: {str(e)}\n")
+                    log.write(f"  Document: {chunk.get('file_name', 'Unknown')}, Page: {chunk.get('page_num', 'Unknown')}\n")
         
         # Update progress
         if progress is not None:
             progress.update(task_id, advance=1)
+    
+    # Log completion
+    if matter:
+        with open(batch_log_path, "a") as log:
+            log.write(f"\n--- Batch extraction completed at {datetime.now()} ---\n")
+            log.write(f"Total events extracted: {len(all_events)}\n")
+            log.write(f"Total errors: {error_count}\n")
+    
+    console.log(f"[bold green]Batch extraction complete - Found {len(all_events)} events, encountered {error_count} errors")
     
     return all_events
 
@@ -616,6 +796,7 @@ def generate_timeline_summary(events: List[Dict[str, Any]]) -> str:
         client = OpenAI(api_key=config.openai.API_KEY)
         response = client.chat.completions.create(
             model=config.openai.MODEL,  # Use the configured model instead of hardcoded value
+            reasoning_effort="low",  # Using low effort for timeline generation to improve speed
             messages=[
                 {
                     "role": "system",
@@ -624,9 +805,9 @@ def generate_timeline_summary(events: List[Dict[str, Any]]) -> str:
                 {
                     "role": "user",
                     "content": prompt,
-                },
-            ],
-            temperature=0.3,  # Lower temperature for more factual responses
+                }
+            ]
+            # Removed temperature parameter as it's causing API errors with o4-mini
         )
         
         summary = response.choices[0].message.content.strip()
@@ -825,6 +1006,9 @@ def extract_events_from_all_documents(
     progress: Optional[Progress] = None,
     resume: bool = True,
     force: bool = False,
+    document_aware: bool = True,
+    parallel: bool = True,
+    max_workers: int = 4,
 ) -> int:
     """Extract timeline events from all documents in a matter.
     
@@ -833,6 +1017,9 @@ def extract_events_from_all_documents(
         progress: Optional progress bar
         resume: Whether to resume from where the previous extraction left off
         force: Whether to force re-extraction of all events (ignores resume)
+        document_aware: Whether to process chunks with document context (groups chunks by document)
+        parallel: Whether to process documents in parallel
+        max_workers: Maximum number of parallel workers for document processing
         
     Returns:
         Number of events extracted
@@ -927,6 +1114,20 @@ def extract_events_from_all_documents(
     # Process chunks in batches
     batch_size = 50
     total_events = 0
+    total_processed = 0
+    total_api_calls = 0
+    total_api_errors = 0
+    
+    # Create log file for detailed tracking
+    log_file_path = logs_dir / "timeline_extract_detail.log"
+    with open(log_file_path, "a") as log_file:
+        log_file.write(f"===============================================\n")
+        log_file.write(f"Timeline extraction started at {datetime.now()}\n")
+        log_file.write(f"Matter: {matter_name} (ID: {matter_id})\n")
+        log_file.write(f"Total chunks to process: {len(chunks)}\n")
+        log_file.write(f"Model: {get_config().openai.MODEL}\n")
+        log_file.write(f"Document-aware mode: {document_aware}\n")
+        log_file.write(f"===============================================\n\n")
     
     # Use existing progress bar or create new one
     progress_owner = False
@@ -938,34 +1139,396 @@ def extract_events_from_all_documents(
     
     try:
         # Create overall task
-        overall_task = progress.add_task(f"Processing {len(chunks)} chunks", total=len(chunks))
-        
-        # Process in batches
-        for i in range(0, len(chunks), batch_size):
-            batch = chunks[i:i+batch_size]
+        if document_aware:
+            # Group chunks by document for document-aware processing
+            console.log("[bold green]Using document-aware processing to maintain context")
             
-            # Update progress description
-            progress.update(
-                overall_task,
-                advance=0,
-                description=f"Batch {i//batch_size + 1}/{(len(chunks) + batch_size - 1) // batch_size}"
-            )
+            # Create a dictionary to group chunks by document
+            docs_to_chunks = {}
+            for chunk in chunks:
+                doc_id = chunk.get("doc_id", "unknown")
+                # Use both doc_id and filename to ensure unique grouping
+                doc_key = f"{doc_id}_{chunk.get('file_name', '')}"
+                if doc_key not in docs_to_chunks:
+                    docs_to_chunks[doc_key] = []
+                docs_to_chunks[doc_key].append(chunk)
             
-            # Process batch
-            events = batch_extract_timeline_events(batch, matter_id, progress)
-            total_events += len(events)
+            # Sort chunks within each document by page_num and chunk_index
+            for doc_key in docs_to_chunks:
+                docs_to_chunks[doc_key].sort(
+                    key=lambda x: (x.get("page_num", 0), x.get("chunk_index", 0))
+                )
             
-            # Update resume log with completed chunk IDs
-            with open(resume_log_path, "a") as f:
-                for chunk in batch:
-                    f.write(f"{chunk['id']}\n")
+            console.log(f"[green]Grouped {len(chunks)} chunks into {len(docs_to_chunks)} documents")
+            
+            # Create a task for document processing
+            overall_task = progress.add_task(f"Processing {len(docs_to_chunks)} documents", total=len(docs_to_chunks))
+            
+            # Process documents in parallel or sequentially
+            if parallel and len(docs_to_chunks) > 1:
+                import concurrent.futures
+                from threading import Lock
+                
+                # Use a lock for thread-safe operations
+                resume_log_lock = Lock()
+                log_file_lock = Lock()
+                stats_lock = Lock()
+                
+                # Initialize shared counters
+                shared_stats = {
+                    "total_events": 0,
+                    "total_processed": 0,
+                    "total_api_calls": 0,
+                    "total_api_errors": 0
+                }
+                
+                # Function to process a single document with all its chunks
+                def process_document(doc_num, doc_info):
+                    doc_key, doc_chunks = doc_info
+                    
+                    if not doc_chunks:
+                        return 0, 0, 0, 0  # No events, processed, API calls, errors
+                    
+                    # Extract document info
+                    doc_name = doc_chunks[0].get("file_name", "Unknown")
+                    doc_pages = max([c.get("page_num", 0) for c in doc_chunks])
+                    
+                    # Update console (thread-safe)
+                    console.log(f"[bold blue]Processing document {doc_num}/{len(docs_to_chunks)}: {doc_name} ({doc_pages} pages)")
+                    
+                    # Log processing start (thread-safe)
+                    with log_file_lock:
+                        with open(log_file_path, "a") as log_file:
+                            log_file.write(f"Document {doc_num}/{len(docs_to_chunks)} - {doc_name} started at {datetime.now()}\n")
+                            log_file.write(f"  Contains {len(doc_chunks)} chunks across {doc_pages} pages\n")
+                    
+                    # Process document chunks
+                    doc_batch_size = min(5, len(doc_chunks))  # Use smaller batches for document processing
+                    doc_events = 0
+                    doc_errors = 0
+                    doc_api_calls = 0
+                    doc_chunks_processed = 0
+                    doc_start_time = datetime.now()
+                    
+                    # Process groups of chunks with document context
+                    for i in range(0, len(doc_chunks), doc_batch_size):
+                        context_batch = doc_chunks[i:i+doc_batch_size]
+                        
+                        for j, chunk in enumerate(context_batch):
+                            chunk_start_time = datetime.now()
+                            try:
+                                # Log extract attempt (thread-safe)
+                                with log_file_lock:
+                                    with open(log_file_path, "a") as log_file:
+                                        log_file.write(f"  Chunk {j+1}/{len(context_batch)} (ID: {chunk['id']}) - Processing at {chunk_start_time}\n")
+                                
+                                # Add document context to the chunk for enhanced extraction
+                                if len(context_batch) > 1:
+                                    # Add surrounding context to the chunk
+                                    chunk_with_context = chunk.copy()
+                                    
+                                    # Include information about surrounding chunks
+                                    context_info = f"\nDocument context: This is chunk {j+1} of {len(context_batch)} from page {chunk.get('page_num', 'unknown')}.\n"
+                                    
+                                    # Add previous chunk summary if available
+                                    if j > 0:
+                                        prev_chunk = context_batch[j-1]
+                                        context_info += f"\nPrevious chunk from page {prev_chunk.get('page_num', 'unknown')} begins with: {prev_chunk.get('text', '')[:150]}...\n"
+                                    
+                                    # Add next chunk summary if available
+                                    if j < len(context_batch) - 1:
+                                        next_chunk = context_batch[j+1]
+                                        context_info += f"\nNext chunk from page {next_chunk.get('page_num', 'unknown')} begins with: {next_chunk.get('text', '')[:150]}...\n"
+                                    
+                                    # Append context to chunk text
+                                    chunk_with_context["enhanced_context"] = context_info
+                                else:
+                                    chunk_with_context = chunk
+                                
+                                # Process chunk with context
+                                doc_api_calls += 1
+                                chunk_events = extract_timeline_events(chunk_with_context, matter_id, batch_mode=True, document_context=True)
+                                doc_events += len(chunk_events)
+                                
+                                # Log result (thread-safe)
+                                chunk_end_time = datetime.now()
+                                duration = (chunk_end_time - chunk_start_time).total_seconds()
+                                with log_file_lock:
+                                    with open(log_file_path, "a") as log_file:
+                                        log_file.write(f"    Completed in {duration:.2f}s - Found {len(chunk_events)} events\n")
+                                
+                            except Exception as e:
+                                # Log error (thread-safe)
+                                doc_errors += 1
+                                with log_file_lock:
+                                    with open(log_file_path, "a") as log_file:
+                                        log_file.write(f"    ERROR: {str(e)}\n")
+                            
+                            # Update count
+                            doc_chunks_processed += 1
+                            
+                            # Update resume log with completed chunk ID (thread-safe)
+                            with resume_log_lock:
+                                with open(resume_log_path, "a") as f:
+                                    f.write(f"{chunk['id']}\n")
+                    
+                    # Log document completion (thread-safe)
+                    doc_end_time = datetime.now()
+                    doc_duration = (doc_end_time - doc_start_time).total_seconds()
+                    with log_file_lock:
+                        with open(log_file_path, "a") as log_file:
+                            log_file.write(f"Document {doc_num}/{len(docs_to_chunks)} completed at {doc_end_time}\n")
+                            log_file.write(f"  Duration: {doc_duration:.2f}s\n")
+                            log_file.write(f"  Events extracted: {doc_events}\n")
+                            log_file.write(f"  Errors: {doc_errors}\n\n")
+                    
+                    # Log completion
+                    console.log(f"[green]Document {doc_num} complete - Found {doc_events} events in {doc_duration:.1f}s")
+                    
+                    # Return statistics
+                    return doc_events, doc_chunks_processed, doc_api_calls, doc_errors
+                
+                # Submit documents for parallel processing
+                console.log(f"[bold green]Processing {len(docs_to_chunks)} documents in parallel with {max_workers} workers")
+                
+                # Adjust max_workers to be no more than the number of documents
+                actual_workers = min(max_workers, len(docs_to_chunks))
+                
+                with concurrent.futures.ThreadPoolExecutor(max_workers=actual_workers) as executor:
+                    # Create a dictionary of futures to track document processing
+                    future_to_doc = {
+                        executor.submit(process_document, i+1, (doc_key, doc_chunks)): i 
+                        for i, (doc_key, doc_chunks) in enumerate(docs_to_chunks.items())
+                    }
+                    
+                    # Process documents as they complete
+                    for future in concurrent.futures.as_completed(future_to_doc):
+                        doc_idx = future_to_doc[future]
+                        try:
+                            # Get results from this document processing
+                            doc_events, doc_processed, doc_api_calls, doc_errors = future.result()
+                            
+                            # Update shared statistics (thread-safe)
+                            with stats_lock:
+                                shared_stats["total_events"] += doc_events
+                                shared_stats["total_processed"] += doc_processed
+                                shared_stats["total_api_calls"] += doc_api_calls
+                                shared_stats["total_api_errors"] += doc_errors
+                            
+                            # Update progress
+                            progress.update(overall_task, advance=1)
+                            
+                        except Exception as e:
+                            console.log(f"[bold red]Error processing document {doc_idx+1}: {str(e)}")
+                            with stats_lock:
+                                shared_stats["total_api_errors"] += 1
+                
+                # Update the main counters from shared statistics
+                total_events = shared_stats["total_events"]
+                total_processed = shared_stats["total_processed"]
+                total_api_calls = shared_stats["total_api_calls"]
+                total_api_errors = shared_stats["total_api_errors"]
+                
+            else:
+                # Process each document's chunks with context sequentially
+                doc_num = 0
+                for doc_key, doc_chunks in docs_to_chunks.items():
+                    doc_num += 1
+                    
+                    if not doc_chunks:
+                        continue
+                        
+                    # Log document processing start
+                    doc_name = doc_chunks[0].get("file_name", "Unknown")
+                    doc_pages = max([c.get("page_num", 0) for c in doc_chunks])
+                    console.log(f"[bold blue]Processing document {doc_num}/{len(docs_to_chunks)}: {doc_name} ({doc_pages} pages)")
+                    
+                    with open(log_file_path, "a") as log_file:
+                        log_file.write(f"Document {doc_num}/{len(docs_to_chunks)} - {doc_name} started at {datetime.now()}\n")
+                        log_file.write(f"  Contains {len(doc_chunks)} chunks across {doc_pages} pages\n")
+                    
+                    # Process document chunks in small batches for manageable context
+                    doc_batch_size = min(5, len(doc_chunks))  # Use smaller batches for document processing
+                    doc_events = 0
+                    doc_errors = 0
+                    doc_start_time = datetime.now()
+                    
+                    # Process groups of chunks with document context
+                    for i in range(0, len(doc_chunks), doc_batch_size):
+                        context_batch = doc_chunks[i:i+doc_batch_size]
+                        
+                        for j, chunk in enumerate(context_batch):
+                            chunk_start_time = datetime.now()
+                            try:
+                                # Log extract attempt
+                                with open(log_file_path, "a") as log_file:
+                                    log_file.write(f"  Chunk {j+1}/{len(context_batch)} (ID: {chunk['id']}) - Processing at {chunk_start_time}\n")
+                                
+                                # Add document context to the chunk for enhanced extraction
+                                if len(context_batch) > 1:
+                                    # Add surrounding context to the chunk
+                                    chunk_with_context = chunk.copy()
+                                    
+                                    # Include information about surrounding chunks
+                                    context_info = f"\nDocument context: This is chunk {j+1} of {len(context_batch)} from page {chunk.get('page_num', 'unknown')}.\n"
+                                    
+                                    # Add previous chunk summary if available
+                                    if j > 0:
+                                        prev_chunk = context_batch[j-1]
+                                        context_info += f"\nPrevious chunk from page {prev_chunk.get('page_num', 'unknown')} begins with: {prev_chunk.get('text', '')[:150]}...\n"
+                                    
+                                    # Add next chunk summary if available
+                                    if j < len(context_batch) - 1:
+                                        next_chunk = context_batch[j+1]
+                                        context_info += f"\nNext chunk from page {next_chunk.get('page_num', 'unknown')} begins with: {next_chunk.get('text', '')[:150]}...\n"
+                                    
+                                    # Append context to chunk text
+                                    chunk_with_context["enhanced_context"] = context_info
+                                else:
+                                    chunk_with_context = chunk
+                                
+                                # Process chunk with context
+                                total_api_calls += 1
+                                chunk_events = extract_timeline_events(chunk_with_context, matter_id, batch_mode=True, document_context=True)
+                                doc_events += len(chunk_events)
+                                total_events += len(chunk_events)
+                                
+                                # Log result
+                                chunk_end_time = datetime.now()
+                                duration = (chunk_end_time - chunk_start_time).total_seconds()
+                                with open(log_file_path, "a") as log_file:
+                                    log_file.write(f"    Completed in {duration:.2f}s - Found {len(chunk_events)} events\n")
+                                
+                            except Exception as e:
+                                # Log error
+                                doc_errors += 1
+                                total_api_errors += 1
+                                with open(log_file_path, "a") as log_file:
+                                    log_file.write(f"    ERROR: {str(e)}\n")
+                            
+                            # Update progress and count
+                            total_processed += 1
+                            
+                            # Update resume log with completed chunk ID
+                            with open(resume_log_path, "a") as f:
+                                f.write(f"{chunk['id']}\n")
+                    
+                    # Log document completion
+                    doc_end_time = datetime.now()
+                    doc_duration = (doc_end_time - doc_start_time).total_seconds()
+                    with open(log_file_path, "a") as log_file:
+                        log_file.write(f"Document {doc_num}/{len(docs_to_chunks)} completed at {doc_end_time}\n")
+                        log_file.write(f"  Duration: {doc_duration:.2f}s\n")
+                        log_file.write(f"  Events extracted: {doc_events}\n")
+                        log_file.write(f"  Errors: {doc_errors}\n\n")
+                    
+                    console.log(f"[green]Document {doc_num} complete - Found {doc_events} events in {doc_duration:.1f}s")
+                    
+                    # Update progress for document
+                    progress.update(overall_task, advance=1)
+                
+        else:
+            # Original batch-based processing without document awareness
+            overall_task = progress.add_task(f"Processing {len(chunks)} chunks", total=len(chunks))
+            
+            # Process in batches
+            for i in range(0, len(chunks), batch_size):
+                batch = chunks[i:i+batch_size]
+                batch_num = i//batch_size + 1
+                total_batches = (len(chunks) + batch_size - 1) // batch_size
+                
+                # Log batch start
+                console.log(f"[bold blue]Starting batch {batch_num}/{total_batches} ({len(batch)} chunks)")
+                with open(log_file_path, "a") as log_file:
+                    log_file.write(f"Batch {batch_num}/{total_batches} started at {datetime.now()}\n")
+                
+                # Update progress description
+                progress.update(
+                    overall_task,
+                    advance=0,
+                    description=f"Batch {batch_num}/{total_batches}"
+                )
+                
+                # Process batch with detailed logging
+                batch_start_time = datetime.now()
+                events = []
+                
+                # Process each chunk individually to log progress
+                batch_events = 0
+                batch_errors = 0
+                
+                for j, chunk in enumerate(batch):
+                    chunk_start_time = datetime.now()
+                    try:
+                        # Log extract attempt
+                        with open(log_file_path, "a") as log_file:
+                            log_file.write(f"  Chunk {j+1}/{len(batch)} (ID: {chunk['id']}) - Processing at {chunk_start_time}\n")
+                        
+                        # Process chunk
+                        total_api_calls += 1
+                        chunk_events = extract_timeline_events(chunk, matter_id, batch_mode=True)
+                        events.extend(chunk_events)
+                        batch_events += len(chunk_events)
+                        
+                        # Log result
+                        chunk_end_time = datetime.now()
+                        duration = (chunk_end_time - chunk_start_time).total_seconds()
+                        with open(log_file_path, "a") as log_file:
+                            log_file.write(f"    Completed in {duration:.2f}s - Found {len(chunk_events)} events\n")
+                        
+                    except Exception as e:
+                        # Log error
+                        batch_errors += 1
+                        total_api_errors += 1
+                        with open(log_file_path, "a") as log_file:
+                            log_file.write(f"    ERROR: {str(e)}\n")
+                    
+                    # Update progress for individual chunk
+                    progress.update(overall_task, advance=1/len(batch))
+                    total_processed += 1
+                
+                # Update resume log with completed chunk IDs
+                with open(resume_log_path, "a") as f:
+                    for chunk in batch:
+                        f.write(f"{chunk['id']}\n")
+                
+                # Add batch results to total
+                total_events += batch_events
+            
+            # Log batch completion
+            batch_end_time = datetime.now()
+            batch_duration = (batch_end_time - batch_start_time).total_seconds()
+            console.log(f"[bold green]Batch {batch_num} complete in {batch_duration:.2f}s - Found {batch_events} events")
+            
+            with open(log_file_path, "a") as log_file:
+                log_file.write(f"Batch {batch_num}/{total_batches} completed at {batch_end_time}\n")
+                log_file.write(f"  Duration: {batch_duration:.2f}s\n")
+                log_file.write(f"  Events extracted: {batch_events}\n")
+                log_file.write(f"  Errors: {batch_errors}\n\n")
             
             # Update overall progress
-            progress.update(overall_task, advance=len(batch))
+            progress.update(overall_task, advance=len(batch) - 1)
     
     finally:
         # Stop progress bar if we created it
         if progress_owner:
             progress.stop()
+        
+        # Write final summary to log
+        with open(log_file_path, "a") as log_file:
+            log_file.write(f"===============================================\n")
+            log_file.write(f"Timeline extraction completed at {datetime.now()}\n")
+            log_file.write(f"Total chunks processed: {total_processed}/{len(chunks)}\n")
+            log_file.write(f"Total events extracted: {total_events}\n")
+            log_file.write(f"Total API calls: {total_api_calls}\n")
+            log_file.write(f"Total API errors: {total_api_errors}\n")
+            log_file.write(f"===============================================\n\n")
+        
+        # Print summary to console
+        console.log(f"[bold green]Timeline extraction complete")
+        console.log(f"Processed {total_processed} chunks, found {total_events} events")
+        if total_api_errors > 0:
+            console.log(f"[bold red]Encountered {total_api_errors} API errors - check log for details")
+        console.log(f"[dim]Detailed log saved to {log_file_path}")
     
     return total_events

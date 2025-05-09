@@ -128,6 +128,15 @@ class ClaimAssistantShell:
                 "extract": {
                     "--matter": None,
                     "-m": None,
+                    "--no-resume": None,
+                    "--force": None,
+                    "-f": None,
+                    "--document-aware": None,
+                    "--no-document-aware": None,
+                    "--parallel": None,
+                    "--no-parallel": None,
+                    "--workers": None,
+                    "-w": None,
                 },
                 "show": {
                     "--matter": None,
@@ -300,7 +309,7 @@ class ClaimAssistantShell:
                 "logs list              - List recent ingestion logs\n"
                 "logs show [log_file]   - Show ingestion log summary\n"
                 "\n[bold]Timeline Commands:[/bold]\n"
-                "timeline extract       - Extract timeline events from documents\n"
+                "timeline extract       - Extract timeline events from documents (use --parallel --workers N for faster processing)\n"
                 "timeline show          - Display timeline of claim events\n"
                 "timeline export        - Export timeline as PDF\n"
                 "timeline types         - List valid timeline event types\n"
