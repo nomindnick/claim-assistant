@@ -569,6 +569,7 @@ def process_pdf(
     ingestion_logger: Optional[Any] = None,  # Added logger parameter
     collect_chunks: bool = False,  # Whether to collect and return chunks instead of saving directly
     defer_saving: bool = False,    # Whether to defer saving chunks to database
+    preprocessed: bool = False,    # Whether the PDF was preprocessed (segmented)
 ) -> Union[None, List[Dict[str, Any]]]:
     """Process a PDF file: extract text, metadata, generate embeddings.
     
@@ -581,6 +582,7 @@ def process_pdf(
         ingestion_logger: Optional ingestion logger
         collect_chunks: Whether to collect and return chunks instead of saving directly
         defer_saving: Whether to defer saving chunks to database
+        preprocessed: Whether the PDF was already preprocessed (segmented)
         
     Returns:
         None if collect_chunks is False, otherwise a list of chunk data dictionaries
@@ -636,7 +638,7 @@ def process_pdf(
             page_hash = get_page_hash(pdf_path, page_num)
 
             # Skip if already processed
-            if is_page_processed(page_hash):
+            if is_page_processed(page_hash) and not preprocessed:
                 console.log(f"Skipping page {page_num+1} (already processed)")
                 progress.update(task_id, advance=1, description=f"Skipped (duplicate)")
                 continue
@@ -815,6 +817,7 @@ def process_pdf(
                             "work_description": work_description,
                             "faiss_id": faiss_id,  # Store FAISS ID directly
                             "matter_id": matter_id,  # Add matter_id
+                            "preprocessed": preprocessed,  # Add flag for preprocessed documents
                         }
                     )
 
@@ -1146,6 +1149,7 @@ def ingest_pdfs(
     enable_logging: bool = True,  # Enable ingestion logging by default
     max_workers: int = None,  # Number of parallel workers (None = auto-determine)
     defer_timeline: bool = False,  # Whether to defer timeline extraction
+    preprocess_large_pdfs: bool = True,  # Whether to preprocess large PDFs
 ) -> None:
     """Ingest a list of PDF files with matter awareness and parallel processing.
 
@@ -1158,6 +1162,7 @@ def ingest_pdfs(
         enable_logging: Whether to enable detailed ingestion logging (default: True)
         max_workers: Maximum number of workers for parallel processing (default: CPU count)
         defer_timeline: Whether to defer timeline extraction until after ingestion
+        preprocess_large_pdfs: Whether to preprocess large PDFs using document segmentation
     """
     import concurrent.futures
     import psutil
@@ -1226,6 +1231,11 @@ def ingest_pdfs(
     
         # Initialize database
         init_database()
+        
+        # Initialize database schema for document relationships if preprocessing is enabled
+        if preprocess_large_pdfs:
+            from .preprocessing import prepare_db_schema
+            prepare_db_schema()
     
         # Create resume log file for this matter
         resume_log_path = data_dir / "ingest_resume.log"
@@ -1309,9 +1319,69 @@ def ingest_pdfs(
                         # Set timeline extraction flag based on defer_timeline option
                         config.timeline.AUTO_EXTRACT = not defer_timeline
                         
-                        # Process the PDF but defer saving chunks to database for batch processing
-                        chunks = process_pdf(pdf_path, progress, task_id, project_name, matter.id, ingestion_logger,
-                                           collect_chunks=True, defer_saving=True)
+                        # Check if this PDF should be preprocessed for document segmentation
+                        if preprocess_large_pdfs:
+                            from .preprocessing import should_preprocess_pdf
+                            
+                            if should_preprocess_pdf(pdf_path, config):
+                                # Process using document segmentation
+                                from .preprocessing import process_large_pdf
+                                
+                                # Set up output directory for preprocessed files
+                                output_dir = os.path.join(
+                                    config.paths.DATA_DIR, 
+                                    'preprocessed', 
+                                    os.path.basename(pdf_path).split('.')[0]
+                                )
+                                
+                                # Process the PDF and get paths to split documents
+                                split_paths = process_large_pdf(pdf_path, output_dir, matter.id, config)
+                                
+                                # Process each split document
+                                split_results = []
+                                
+                                for split_path in split_paths:
+                                    # Create a sub-progress
+                                    sub_task_id = progress.add_task(
+                                        f"Processing segment {os.path.basename(split_path)}", 
+                                        total=1
+                                    )
+                                    
+                                    # Process the split document
+                                    try:
+                                        process_pdf(
+                                            Path(split_path),
+                                            progress,
+                                            sub_task_id,
+                                            project_name=project_name,
+                                            matter_id=matter.id,
+                                            ingestion_logger=ingestion_logger,
+                                            preprocessed=True
+                                        )
+                                        split_results.append((split_path, True))
+                                    except Exception as split_e:
+                                        split_results.append((split_path, False))
+                                        console.log(f"[bold red]Error processing split document {split_path}: {str(split_e)}")
+                                
+                                # Mark original PDF as completed
+                                with open(resume_log_path, "a") as f:
+                                    f.write(f"{pdf_path.absolute()}\n")
+                                
+                                # Return success if any splits were processed successfully
+                                success = any(res[1] for res in split_results)
+                                return (pdf_path, success, None if success else "Error in split processing", [])
+                        
+                        # Standard processing for regular PDFs or if preprocessing is disabled
+                        chunks = process_pdf(
+                            pdf_path, 
+                            progress, 
+                            task_id, 
+                            project_name, 
+                            matter.id, 
+                            ingestion_logger,
+                            collect_chunks=True, 
+                            defer_saving=True
+                        )
                         
                         # Mark as completed for resume functionality
                         with open(resume_log_path, "a") as f:

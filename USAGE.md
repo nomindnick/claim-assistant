@@ -84,6 +84,10 @@ python -m claimctl.cli ingest /path/to/directory --adaptive-chunking
 python -m claimctl.cli ingest /path/to/directory --no-semantic-chunking
 python -m claimctl.cli ingest /path/to/directory --no-hierarchical-chunking
 
+# Control document segmentation for large PDFs
+python -m claimctl.cli ingest /path/to/directory --segment      # Enable document segmentation (default)
+python -m claimctl.cli ingest /path/to/directory --no-segment   # Disable document segmentation
+
 # Control ingestion logging
 python -m claimctl.cli ingest /path/to/directory --logging      # Enable detailed logging (default)
 python -m claimctl.cli ingest /path/to/directory --no-logging   # Disable detailed logging
@@ -97,6 +101,7 @@ During ingestion, the system:
 - Extracts text from each page
 - Runs OCR if needed for scanned content
 - Saves page images for reference
+- Detects and segments logical documents within large PDFs (if enabled)
 - Classifies document types (Email, ChangeOrder, Invoice, etc.)
 - Extracts enhanced metadata (amounts, time periods, section references, etc.)
 - Analyzes document structure for optimal chunking
@@ -158,6 +163,70 @@ python -m claimctl.cli ask "What caused the delay?" --md
 ```
 
 ## Advanced Usage
+
+### Document Segmentation for Large PDFs
+
+When working with large PDFs containing multiple logical documents, the system can automatically segment them using ML-based boundary detection:
+
+```bash
+# Enable document segmentation for all files during ingestion (default)
+python -m claimctl.cli ingest path/to/large_pdf.pdf --segment
+
+# Disable document segmentation during ingestion
+python -m claimctl.cli ingest path/to/large_pdf.pdf --no-segment
+
+# Manually preprocess a large PDF containing multiple documents
+python -m claimctl.cli preprocess segment path/to/large_pdf.pdf
+
+# Preprocess with visualization (helps for tuning)
+python -m claimctl.cli preprocess segment path/to/large_pdf.pdf --visualize
+
+# Adjust sensitivity of boundary detection
+python -m claimctl.cli preprocess segment path/to/large_pdf.pdf --threshold 1.2  # Lower = more boundaries
+
+# Specify minimum confidence for a detected boundary
+python -m claimctl.cli preprocess segment path/to/large_pdf.pdf --min-confidence 0.4
+
+# Process multiple PDFs
+python -m claimctl.cli preprocess segment path/to/*.pdf --batch-size 4
+
+# Configure document segmentation settings
+python -m claimctl.cli preprocess configure --enabled --threshold 1.5 --min-confidence 0.3 --pages-threshold 50
+```
+
+#### How ML-Based Document Segmentation Works
+
+The document segmentation system:
+
+1. **Semantic Analysis**: Uses embeddings to identify semantic shifts in the document content that indicate natural boundaries between different document types.
+
+2. **Boundary Detection**: Analyzes the similarity between adjacent text segments to detect significant semantic shifts that likely represent boundaries between different documents.
+
+3. **Natural Break Identification**: Refines detected boundaries to align with natural breaks in the text such as page breaks, paragraph breaks, or section headers.
+
+4. **Confidence Scoring**: Assigns confidence scores to potential boundaries based on multiple factors including semantic shift magnitude and presence of document header/footer indicators.
+
+5. **Document Classification**: Classifies each extracted document by type (e.g., email, change order, contract) using content-based analysis.
+
+6. **Database Tracking**: Maintains relationships between original PDFs and extracted documents in a dedicated database.
+
+7. **Optimized Processing**: Automatically triggered for large PDFs based on configurable page count and file size thresholds.
+
+#### Benefits of Document Segmentation
+
+- **Improved Context Preservation**: Each document is processed as a complete unit, maintaining logical boundaries and context.
+
+- **Enhanced Semantic Search**: Searches return more relevant results when document boundaries are properly maintained.
+
+- **Better Timeline Extraction**: Timeline events are extracted with proper document context, significantly improving accuracy.
+
+- **More Precise Query Answers**: Answers are based on logically distinct documents rather than arbitrary chunks that might cross document boundaries.
+
+- **Automatic Classification**: Each segmented document is automatically classified by type for better organization.
+
+- **Visualization Tools**: Boundary visualization helps understand and tune the segmentation process.
+
+This feature is particularly useful for construction projects where large PDFs often contain a mix of different document types (daily reports, correspondence, change orders, etc.) bundled together.
 
 ### Ingestion Logging and Analysis
 
@@ -352,6 +421,57 @@ python -m claimctl.cli ingest /path/to/pdfs --matter "Smith Construction Claim"
 python -m claimctl.cli ask "What caused the delay?" --matter "Jones Project"
 ```
 
+### Optimized Timeline Extraction
+
+The system provides several optimizations for timeline extraction:
+
+```bash
+# Extract timeline events with parallel processing (recommended)
+python -m claimctl.cli timeline extract --parallel --workers 4
+
+# Extract timeline events with document-aware processing for better context
+python -m claimctl.cli timeline extract --document-aware
+
+# Combine optimizations for fastest performance
+python -m claimctl.cli timeline extract --parallel --workers 4 --document-aware
+
+# Force re-extraction of all timeline events (clears existing events)
+python -m claimctl.cli timeline extract --force
+
+# Start from the beginning without clearing existing events
+python -m claimctl.cli timeline extract --no-resume
+```
+
+The optimized timeline extraction features:
+
+1. **Parallel Processing**: Processes multiple documents simultaneously for faster extraction
+2. **Document-Aware Context**: Maintains document context during extraction for better event recognition
+3. **Optimized Prompting**: Uses lower reasoning effort for faster API responses 
+4. **Enhanced Error Handling**: Improved error recovery with retries and backoff strategy
+5. **Resumable Extraction**: Can continue from where it left off if interrupted
+6. **Detailed Logging**: Comprehensive logging of the extraction process
+
+### Timeline Visualization and Export
+
+View and export timelines with various options:
+
+```bash
+# Show timeline with default settings (up to 1000 events)
+python -m claimctl.cli timeline show
+
+# Filter timeline by date range, event type, and importance
+python -m claimctl.cli timeline show --from "2024-01-01" --to "2024-05-31" --type change_order --min-importance 0.4
+
+# Change timeline display format
+python -m claimctl.cli timeline show --format text  # Options: table, text
+
+# Export timeline as PDF
+python -m claimctl.cli timeline export --open  # Add --open to automatically open the PDF
+
+# Export timeline with filters
+python -m claimctl.cli timeline export --from "2024-01-01" --to "2024-05-31" --type change_order
+```
+
 # Configuration Options
 
 You can edit `~/.claimctl.ini` to change:
@@ -371,6 +491,17 @@ You can edit `~/.claimctl.ini` to change:
   - ADAPTIVE_CHUNKING: Enable automatic structure detection (default is True)
   - LARGE_DOC_THRESHOLD: Character threshold for large document optimization (default is 500000)
   - SIMILARITY_THRESHOLD: Threshold for detecting duplicate chunks (default is 0.8)
+- Document segmentation parameters:
+  - ENABLED: Enable ML-based document segmentation for large PDFs (default is True)
+  - THRESHOLD_MULTIPLIER: Controls sensitivity of boundary detection (higher values = fewer boundaries)
+  - MIN_CONFIDENCE: Minimum confidence score for boundaries (default is 0.3)
+  - MIN_DOCUMENT_LENGTH: Minimum character length for a document segment (default is 1000)
+  - MIN_BOUNDARY_DISTANCE: Minimum distance between boundaries (default is 2000 characters)
+  - SEGMENT_SIZE: Size of text segments for analysis (default is 500 characters)
+  - SEGMENT_STRIDE: Overlap between segments (default is 100 characters)
+  - PAGES_THRESHOLD: Minimum page count to trigger auto-segmentation (default is 50 pages)
+  - SIZE_THRESHOLD: Minimum file size to trigger auto-segmentation (default is 10MB)
+  - VISUALIZE: Generate boundary visualizations during segmentation (default is False)
 - BM25 search parameters (K1, B, WEIGHT)
 - Project settings (DEFAULT_PROJECT)
 - Matter settings (MATTER_DIR, CURRENT_MATTER)
@@ -410,6 +541,11 @@ If you encounter issues:
      brew install tesseract  # macOS
      ```
 
+4. **Timeline Export Errors**:
+   - If you encounter string formatting errors in timeline export, try using a different date range or event types filter
+   - Ensure you have at least a few timeline events before attempting to export
+   - Check if any events might be missing crucial date information
+
 ### Clearing Data and Starting Fresh
 
 You can clear previously ingested data and start fresh using the `clear` command:
@@ -439,6 +575,9 @@ The system can extract timeline events from your documents and create comprehens
 # Extract timeline events from all documents in the current matter (if not already extracted during ingestion)
 python -m claimctl.cli timeline extract
 
+# Use optimized extraction with parallel processing and document context
+python -m claimctl.cli timeline extract --parallel --workers 4 --document-aware
+
 # Resume an interrupted timeline extraction (default behavior)
 python -m claimctl.cli timeline extract
 
@@ -448,7 +587,7 @@ python -m claimctl.cli timeline extract --force
 # Start from the beginning but don't delete existing events
 python -m claimctl.cli timeline extract --no-resume
 
-# Show the timeline for the current matter
+# Show the timeline for the current matter (up to 1000 events by default)
 python -m claimctl.cli timeline show
 
 # Show timeline with specific parameters
@@ -547,10 +686,10 @@ python -m claimctl.cli ingest ~/test-pdfs/*.pdf
 # Ask a question with default settings (retrieves top 6 documents)
 python -m claimctl.cli ask "Where is Change Order 12 justified?"
 
-# Extract timeline events from all documents
-python -m claimctl.cli timeline extract
+# Extract timeline events with optimized performance
+python -m claimctl.cli timeline extract --parallel --workers 4 --document-aware
 
-# View the timeline
+# View the timeline (up to 1000 events by default)
 python -m claimctl.cli timeline show
 
 # Show financial impact summary
@@ -615,8 +754,10 @@ logs show
 # Ask a question
 ask Where is Change Order 12 justified?
 
-# Extract and view timeline
-timeline extract
+# Extract timeline events with optimized performance
+timeline extract --parallel --workers 4 --document-aware
+
+# View timeline (up to 1000 events by default)
 timeline show
 
 # View financial summary

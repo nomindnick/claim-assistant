@@ -50,6 +50,9 @@ timeline_app.add_typer(financials_app, name="financials")
 contradictions_app = typer.Typer(help="Manage contradictions in timelines")
 timeline_app.add_typer(contradictions_app, name="contradictions")
 
+preprocess_app = typer.Typer(help="Preprocess documents for segmentation")
+app.add_typer(preprocess_app, name="preprocess")
+
 
 @app.command("ingest")
 def ingest_command(
@@ -78,24 +81,28 @@ def ingest_command(
         None, "--matter", "-m", help="Matter name to associate with documents"
     ),
     semantic_chunking: bool = typer.Option(
-        None, "--semantic-chunking/--no-semantic-chunking", 
+        None, "--semantic-chunking/--no-semantic-chunking",
         help="Use semantic chunking instead of character-based chunking"
     ),
     hierarchical_chunking: bool = typer.Option(
-        None, "--hierarchical-chunking/--no-hierarchical-chunking", 
+        None, "--hierarchical-chunking/--no-hierarchical-chunking",
         help="Use hierarchical chunking for structured documents"
     ),
     adaptive_chunking: bool = typer.Option(
-        None, "--adaptive-chunking/--no-adaptive-chunking", 
+        None, "--adaptive-chunking/--no-adaptive-chunking",
         help="Automatically detect document structure and choose optimal chunking method"
     ),
     logging: bool = typer.Option(
-        True, "--logging/--no-logging", 
+        True, "--logging/--no-logging",
         help="Enable detailed ingestion logging"
     ),
     timeline_extract: bool = typer.Option(
         None, "--timeline-extract/--no-timeline-extract",
         help="Enable automatic timeline event extraction during ingestion"
+    ),
+    segment_documents: bool = typer.Option(
+        True, "--segment/--no-segment",
+        help="Enable document segmentation for large PDFs"
     ),
 ) -> None:
     """Ingest PDF files into the claim assistant database."""
@@ -153,7 +160,12 @@ def ingest_command(
             config.chunking.ADAPTIVE_CHUNKING = adaptive_chunking
         if timeline_extract is not None:
             config.timeline.AUTO_EXTRACT = timeline_extract
-        
+
+        # Update document segmentation config
+        if 'document_segmentation' not in config:
+            config['document_segmentation'] = {}
+        config['document_segmentation']['ENABLED'] = segment_documents
+
         ingest_pdfs(
             expanded_paths,
             project_name=project,
@@ -161,6 +173,7 @@ def ingest_command(
             resume_on_error=resume,
             matter_name=matter,  # Pass matter name
             enable_logging=logging,  # Pass logging flag
+            preprocess_large_pdfs=segment_documents,  # Pass document segmentation flag
         )
     except Exception as e:
         console.print(f"[bold red]Error: {str(e)}")
@@ -1530,6 +1543,203 @@ def mark_contradiction_command(
         console.print(f"[bold red]Error marking contradiction: {str(e)}")
         raise typer.Exit(1)
 
+
+# Add preprocessing commands
+@preprocess_app.command("segment")
+def preprocess_segment_command(
+    paths: List[Path] = typer.Argument(
+        ...,
+        help="PDF file paths to preprocess",
+        exists=True,
+        dir_okay=True,
+        resolve_path=True,
+    ),
+    matter: Optional[str] = typer.Option(
+        None, "--matter", "-m", help="Matter to use"
+    ),
+    visualize: bool = typer.Option(
+        False, "--visualize", "-v", help="Generate boundary visualizations"
+    ),
+    batch_size: int = typer.Option(
+        1, "--batch-size", "-b", help="Number of PDFs to process in parallel"
+    ),
+    output_dir: Optional[str] = typer.Option(
+        None, "--output-dir", "-o", help="Output directory for preprocessed files"
+    ),
+    threshold: float = typer.Option(
+        1.5, "--threshold", "-t", help="Sensitivity threshold for boundary detection"
+    ),
+    min_confidence: float = typer.Option(
+        0.3, "--min-confidence", help="Minimum confidence for boundaries"
+    ),
+    recursive: bool = typer.Option(
+        False, "--recursive", "-r", help="Recursively process directories"
+    ),
+) -> None:
+    """
+    Preprocess large multi-document PDFs by splitting them into logical documents.
+    """
+    # Expand directories to individual PDF files if needed
+    expanded_paths = []
+
+    for path in paths:
+        if path.is_dir():
+            # Find all PDFs in the directory
+            if recursive:
+                # Find PDFs recursively in all subdirectories
+                for pdf_path in path.glob("**/*.pdf"):
+                    expanded_paths.append(pdf_path)
+            else:
+                # Find PDFs only in the top directory
+                for pdf_path in path.glob("*.pdf"):
+                    expanded_paths.append(pdf_path)
+        else:
+            # Individual file (verify it's a PDF)
+            if path.suffix.lower() != ".pdf":
+                console.print(f"[bold red]Error: {path} is not a PDF file")
+                raise typer.Exit(1)
+            expanded_paths.append(path)
+
+    # Sort paths for consistent processing order
+    expanded_paths.sort()
+
+    # Check if we found any PDFs
+    if not expanded_paths:
+        console.print("[bold red]Error: No PDF files found")
+        raise typer.Exit(1)
+
+    console.print(f"[bold green]Found {len(expanded_paths)} PDF files to process")
+
+    # Use current matter if not specified
+    if not matter:
+        matter = get_current_matter()
+        if not matter:
+            console.print("[bold yellow]No active matter. Use 'matter switch' or specify --matter")
+            raise typer.Exit(1)
+
+    # Get matter ID and directories
+    with get_session() as session:
+        matter_obj = session.query(Matter).filter(Matter.name == matter).first()
+        if not matter_obj:
+            console.print(f"[bold red]Matter '{matter}' not found")
+            raise typer.Exit(1)
+
+        matter_id = matter_obj.id
+        matter_dir = Path(matter_obj.data_directory).parent
+
+    # Determine output directory
+    if not output_dir:
+        output_dir = os.path.join(matter_dir, "preprocessed")
+
+    # Ensure output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Set up configuration
+    config = get_config()
+    if 'document_segmentation' not in config:
+        config['document_segmentation'] = {}
+
+    config['document_segmentation'].update({
+        'ENABLED': True,
+        'THRESHOLD_MULTIPLIER': threshold,
+        'MIN_CONFIDENCE': min_confidence,
+        'VISUALIZE': visualize
+    })
+
+    # Import preprocessing module
+    try:
+        from .preprocessing import process_large_pdf, prepare_db_schema
+
+        # Ensure database schema is prepared
+        prepare_db_schema()
+
+        # Process each PDF
+        with create_progress(f"Preprocessing {len(expanded_paths)} PDFs") as progress:
+            task = progress.add_task("Processing", total=len(expanded_paths))
+
+            for path in expanded_paths:
+                try:
+                    console.print(f"[bold blue]Processing {path}")
+
+                    # Process the PDF
+                    pdf_output_dir = os.path.join(output_dir, path.stem)
+                    segments = process_large_pdf(path, pdf_output_dir, matter_id, config)
+
+                    console.print(f"[bold green]Created {len(segments)} document segments")
+                    for i, segment_path in enumerate(segments, 1):
+                        console.print(f"  {i}. {os.path.basename(segment_path)}")
+
+                    progress.update(task, advance=1)
+                except Exception as e:
+                    console.print(f"[bold red]Error processing {path}: {str(e)}")
+                    if not typer.confirm("Continue with next file?", default=True):
+                        raise typer.Exit(1)
+
+    except Exception as e:
+        console.print(f"[bold red]Error: {str(e)}")
+        raise typer.Exit(1)
+
+@preprocess_app.command("configure")
+def preprocess_configure_command(
+    enabled: bool = typer.Option(
+        True, "--enabled/--disabled", help="Enable/disable document segmentation"
+    ),
+    threshold: float = typer.Option(
+        1.5, "--threshold", "-t", help="Sensitivity threshold for boundary detection (0.5-3.0)"
+    ),
+    min_confidence: float = typer.Option(
+        0.3, "--min-confidence", help="Minimum confidence for boundaries (0.0-1.0)"
+    ),
+    min_document_length: int = typer.Option(
+        1000, "--min-document-length", "-l", help="Minimum length of a document in characters"
+    ),
+    min_boundary_distance: int = typer.Option(
+        2000, "--min-boundary-distance", "-d", help="Minimum distance between boundaries"
+    ),
+    pages_threshold: int = typer.Option(
+        50, "--pages-threshold", "-p", help="Minimum pages to trigger segmentation"
+    ),
+    size_threshold: int = typer.Option(
+        10000000, "--size-threshold", "-s", help="Minimum file size to trigger segmentation (bytes)"
+    ),
+    visualize: bool = typer.Option(
+        False, "--visualize/--no-visualize", help="Generate visualizations during segmentation"
+    ),
+) -> None:
+    """Configure document segmentation settings."""
+    # Load config
+    config = get_config()
+
+    # Ensure document_segmentation section exists
+    if 'document_segmentation' not in config:
+        config['document_segmentation'] = {}
+
+    # Update settings
+    config['document_segmentation'].update({
+        'ENABLED': enabled,
+        'THRESHOLD_MULTIPLIER': threshold,
+        'MIN_CONFIDENCE': min_confidence,
+        'MIN_DOCUMENT_LENGTH': min_document_length,
+        'MIN_BOUNDARY_DISTANCE': min_boundary_distance,
+        'PAGES_THRESHOLD': pages_threshold,
+        'SIZE_THRESHOLD': size_threshold,
+        'VISUALIZE': visualize
+    })
+
+    # Save config
+    from .config import save_config
+    save_config(config)
+
+    # Show current configuration
+    console.print("[bold green]Document segmentation configuration updated:")
+    console.print(f"Enabled: {enabled}")
+    console.print(f"Threshold Multiplier: {threshold}")
+    console.print(f"Minimum Confidence: {min_confidence}")
+    console.print(f"Minimum Document Length: {min_document_length} chars")
+    console.print(f"Minimum Boundary Distance: {min_boundary_distance} chars")
+    console.print(f"Pages Threshold: {pages_threshold} pages")
+    console.print(f"Size Threshold: {size_threshold} bytes ({size_threshold/1000000:.1f} MB)")
+    console.print(f"Generate Visualizations: {visualize}")
 
 # Ensure database is initialized when module is loaded
 try:

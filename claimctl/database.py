@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session, relationship, sessionmaker
 from sqlalchemy.sql import func
 
 from .config import get_config
+import sqlite3
 
 # Initialize SQLAlchemy
 Base = declarative_base()
@@ -1157,12 +1158,32 @@ def get_current_matter_id() -> Optional[int]:
         return matter.id if matter else None
 
 
+def get_db_connection() -> sqlite3.Connection:
+    """Get a SQLite database connection.
+
+    This function provides direct access to the SQLite database using the sqlite3 module.
+    Primarily used for schema migrations and document relationship management.
+
+    Returns:
+        A SQLite connection object
+    """
+    config = get_config()
+    db_path = Path(config.paths.INDEX_DIR) / "catalog.db"
+    db_path.parent.mkdir(exist_ok=True, parents=True)
+
+    # Create SQLite connection
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row  # Use Row for easier column access
+
+    return conn
+
+
 def update_running_totals(matter_id: int) -> bool:
     """Recalculate running totals for all financial events in a matter.
-    
+
     Args:
         matter_id: ID of the matter
-        
+
     Returns:
         True if successful, False otherwise
     """

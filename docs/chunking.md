@@ -94,3 +94,21 @@ Based on this analysis, the system selects the most appropriate chunking method:
 - **Hierarchical chunking** for highly structured documents (contracts, specifications)
 - **Semantic chunking** for narrative text with natural paragraph breaks
 - **Regular chunking** for tabular data or documents without clear structure
+
+## Relationship to Timeline Extraction
+
+The chunking method used can significantly affect the quality of timeline events extracted from documents:
+
+- **Hierarchical chunking** preserves section relationships which helps with contextual understanding of events described in contracts and formal documents
+- **Semantic chunking** ensures that related information about a single event stays together, even across paragraph boundaries
+- **Document-aware processing** during timeline extraction further enhances event extraction by maintaining awareness of document context beyond individual chunks
+
+For optimal timeline extraction, use:
+
+```bash
+# During ingestion
+python -m claimctl.cli ingest path/to/documents/*.pdf --adaptive-chunking
+
+# For manual timeline extraction
+python -m claimctl.cli timeline extract --document-aware
+```
