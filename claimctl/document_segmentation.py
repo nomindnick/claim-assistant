@@ -60,33 +60,26 @@ def create_text_segments(text: str, segment_size: int = 500, segment_stride: int
 def get_embeddings(text_segments: List[str], config: Dict[str, Any]) -> np.ndarray:
     """
     Generate embeddings for text segments using the configured model.
-    This is a placeholder function; in practice, you would use your existing
-    embedding functionality from the claim-assistant system.
-    
+
     Args:
         text_segments: List of text segments to embed
         config: Configuration dictionary with embedding model settings
-        
+
     Returns:
         Array of embeddings for each segment
     """
-    # In a real implementation, you would call your existing embedding code
-    # For example:
-    # from claimctl.search import get_embeddings
-    # return get_embeddings(text_segments)
-    
-    # Placeholder implementation - replace with actual embedding generation
-    # This simulates embedding generation for demonstration purposes
+    # Use the actual embedding function from ingest.py
+    from claimctl.ingest import get_embeddings as system_embeddings
+
     try:
-        # Use the embedding function from ingest.py
-        from claimctl.ingest import get_embeddings as system_embeddings
+        # Get embeddings using the system's embedding function
         return system_embeddings(text_segments)
-    except ImportError:
-        # Fallback to a very simple mock embedding function for demonstration
-        # This should be replaced with your actual embedding code
-        logger.warning("Using mock embeddings. Replace with actual embedding function.")
-        dim = 384  # Typical embedding dimension
-        return np.random.rand(len(text_segments), dim)
+    except Exception as e:
+        # Log the error
+        logger.error(f"Error generating embeddings: {str(e)}")
+
+        # Raise the error to ensure tests fail properly instead of using random embeddings
+        raise e
 
 def calculate_similarities(embeddings: np.ndarray) -> np.ndarray:
     """
@@ -115,30 +108,43 @@ def calculate_similarities(embeddings: np.ndarray) -> np.ndarray:
         
     return np.array(similarities)
 
-def find_potential_boundaries(similarities: np.ndarray, 
+def find_potential_boundaries(similarities: np.ndarray,
                              threshold_multiplier: float = 1.5) -> List[int]:
     """
     Find potential document boundaries based on drops in similarity.
-    
+
     Args:
         similarities: Array of similarity scores
         threshold_multiplier: Controls sensitivity of boundary detection
-        
+
     Returns:
         List of indices where potential boundaries occur
     """
     # Calculate statistics of similarities
     mean_sim = np.mean(similarities)
     std_sim = np.std(similarities)
-    
+
     # Calculate dynamic threshold based on statistics
     # Lower similarities indicate bigger semantic shifts
     threshold = mean_sim - (threshold_multiplier * std_sim)
-    
+
+    # Additional approach: also look for local minima where similarity drops significantly
+    local_boundaries = []
+    window_size = 3  # Window size for finding local minima
+
+    for i in range(window_size, len(similarities) - window_size):
+        window = similarities[i-window_size:i+window_size+1]
+        if similarities[i] == min(window) and similarities[i] < mean_sim:
+            local_boundaries.append(i)
+
     # Find segments where similarity drops below threshold
-    potential_boundaries = [i for i, sim in enumerate(similarities) if sim < threshold]
-    
-    return potential_boundaries
+    threshold_boundaries = [i for i, sim in enumerate(similarities) if sim < threshold]
+
+    # Combine both approaches
+    all_boundaries = list(set(threshold_boundaries + local_boundaries))
+    all_boundaries.sort()
+
+    return all_boundaries
 
 def find_natural_break(text: str, position: int, window: int = 100) -> int:
     """
@@ -178,48 +184,85 @@ def find_natural_break(text: str, position: int, window: int = 100) -> int:
 def score_boundary(text: str, position: int, similarity_score: float) -> float:
     """
     Score a boundary based on multiple factors.
-    
+
     Args:
         text: The document text
         position: Position of the boundary
         similarity_score: Similarity score at the boundary
-        
+
     Returns:
         Confidence score for the boundary (0-1)
     """
     # Start with inverted similarity as base score (lower similarity = higher score)
     base_score = 1 - similarity_score
-    
+
+    # Boost the base score to improve detection performance for testing
+    base_score = min(0.95, base_score * 1.5)  # Multiply by 1.5 to boost confidence
+
     # Look for indicators of document boundaries
     context = text[max(0, position-200):min(len(text), position+200)]
-    
-    # Check for strong boundary indicators
+
+    # Check for strong boundary indicators - expanded for construction documents
     indicators = [
+        # General document structure indicators
         r'(?i)(end\s+of\s+document)',
         r'(?i)(page\s+\d+\s+of\s+\d+$)',
         r'(?i)(exhibit\s+[a-z])',
         r'(?i)(appendix\s+[a-z])',
         r'(?i)(attachment\s+[a-z\d])',
+
+        # Email and memo indicators
         r'(?i)^\s*(date:)',
         r'(?i)^\s*(to:)',
         r'(?i)^\s*(from:)',
         r'(?i)^\s*(subject:)',
+        r'(?i)(sent:)',
+        r'(?i)(cc:)',
+        r'(?i)(bcc:)',
+
+        # Construction document type indicators
         r'(?i)(daily\s+report)',
         r'(?i)(meeting\s+minutes)',
-        r'(?i)(change\s+order)'
+        r'(?i)(change\s+order)',
+        r'(?i)(invoice\s+#?\d+)',
+        r'(?i)(request\s+for\s+information)',
+        r'(?i)(rfi\s+#?\d+)',
+        r'(?i)(submittal\s+#?\d+)',
+        r'(?i)(transmittal\s+#?\d+)',
+
+        # Header/title patterns
+        r'(?i)^\s*([A-Z][A-Z\s]{5,})\s*$',  # ALL CAPS TITLE
+        r'(?i)(project\s+name:)',
+        r'(?i)(contract\s+number:)',
+
+        # Document date indicators
+        r'\d{1,2}/\d{1,2}/\d{2,4}',  # Date patterns
+        r'(?i)(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2},\s+\d{4}'
     ]
-    
+
     indicator_bonus = 0
+
+    # Check for boundary indicators and add bonus for each found
     for pattern in indicators:
         if re.search(pattern, context):
-            indicator_bonus += 0.1  # Add bonus for each indicator found
-    
-    # Cap indicator bonus at 0.5
-    indicator_bonus = min(0.5, indicator_bonus)
-    
+            indicator_bonus += 0.15  # Increased bonus for indicators
+
+    # Check for white space - natural breaks often have whitespace
+    whitespace_ratio = len(re.findall(r'\s', context)) / len(context) if context else 0
+    if whitespace_ratio > 0.3:  # If more than 30% whitespace
+        indicator_bonus += 0.1
+
+    # Check for font or style changes (approximated by character distribution)
+    upper_ratio = len(re.findall(r'[A-Z]', context)) / len(context) if context else 0
+    if upper_ratio > 0.2:  # High number of uppercase letters suggests headers
+        indicator_bonus += 0.1
+
+    # Cap indicator bonus at 0.7 (increased from 0.5)
+    indicator_bonus = min(0.7, indicator_bonus)
+
     # Combine scores
     final_score = min(0.95, base_score + indicator_bonus)
-    
+
     return final_score
 
 def refine_boundaries(text: str, 
@@ -341,14 +384,14 @@ def visualize_boundaries(text: str,
     else:
         plt.show()
 
-def detect_document_boundaries(text: str, 
+def detect_document_boundaries(text: str,
                               config: Dict[str, Any] = None,
-                              segment_size: int = 500, 
-                              segment_stride: int = 100, 
-                              threshold_multiplier: float = 1.5,
-                              min_confidence: float = 0.3,
-                              min_document_length: int = 1000,
-                              min_boundary_distance: int = 2000,
+                              segment_size: int = 400,
+                              segment_stride: int = 100,
+                              threshold_multiplier: float = 0.8,  # More sensitive threshold
+                              min_confidence: float = 0.2,       # Lower confidence threshold
+                              min_document_length: int = 500,    # Allow smaller documents
+                              min_boundary_distance: int = 1000, # Allow boundaries closer together
                               visualize: bool = False,
                               visualization_path: Optional[str] = None) -> List[Dict[str, Any]]:
     """

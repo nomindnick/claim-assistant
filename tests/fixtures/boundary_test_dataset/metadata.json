@@ -1,0 +1,454 @@
+{
+  "dataset_name": "document_boundary_test_dataset",
+  "created_date": "4/12/2025",
+  "pdf_count": 8,
+  "total_document_count": 29,
+  "pdfs": [
+    {
+      "filename": "test_multi_doc_1.pdf",
+      "document_count": 2,
+      "document_types": [
+        "email",
+        "change_order"
+      ],
+      "total_pages": 2,
+      "boundaries": [
+        {
+          "position": 506,
+          "previous_doc": "email",
+          "next_doc": "change_order",
+          "confidence": 1.0
+        }
+      ],
+      "documents": [
+        {
+          "type": "email",
+          "start_position": 0,
+          "end_position": 455,
+          "length": 455,
+          "page_count": 1
+        },
+        {
+          "type": "change_order",
+          "start_position": 455,
+          "end_position": 803,
+          "length": 348,
+          "page_count": 1
+        }
+      ]
+    },
+    {
+      "filename": "test_multi_doc_2.pdf",
+      "document_count": 2,
+      "document_types": [
+        "meeting_minutes",
+        "daily_report"
+      ],
+      "total_pages": 3,
+      "boundaries": [
+        {
+          "position": 661,
+          "previous_doc": "meeting_minutes",
+          "next_doc": "daily_report",
+          "confidence": 1.0
+        }
+      ],
+      "documents": [
+        {
+          "type": "meeting_minutes",
+          "start_position": 0,
+          "end_position": 610,
+          "length": 610,
+          "page_count": 2
+        },
+        {
+          "type": "daily_report",
+          "start_position": 610,
+          "end_position": 1090,
+          "length": 480,
+          "page_count": 1
+        }
+      ]
+    },
+    {
+      "filename": "test_multi_doc_3.pdf",
+      "document_count": 2,
+      "document_types": [
+        "invoice",
+        "letter"
+      ],
+      "total_pages": 2,
+      "boundaries": [
+        {
+          "position": 463,
+          "previous_doc": "invoice",
+          "next_doc": "letter",
+          "confidence": 1.0
+        }
+      ],
+      "documents": [
+        {
+          "type": "invoice",
+          "start_position": 0,
+          "end_position": 412,
+          "length": 412,
+          "page_count": 1
+        },
+        {
+          "type": "letter",
+          "start_position": 412,
+          "end_position": 1426,
+          "length": 1014,
+          "page_count": 1
+        }
+      ]
+    },
+    {
+      "filename": "test_multi_doc_4.pdf",
+      "document_count": 3,
+      "document_types": [
+        "email",
+        "meeting_minutes",
+        "invoice"
+      ],
+      "total_pages": 4,
+      "boundaries": [
+        {
+          "position": 612,
+          "previous_doc": "email",
+          "next_doc": "meeting_minutes",
+          "confidence": 1.0
+        },
+        {
+          "position": 1486,
+          "previous_doc": "meeting_minutes",
+          "next_doc": "invoice",
+          "confidence": 1.0
+        }
+      ],
+      "documents": [
+        {
+          "type": "email",
+          "start_position": 0,
+          "end_position": 561,
+          "length": 561,
+          "page_count": 1
+        },
+        {
+          "type": "meeting_minutes",
+          "start_position": 561,
+          "end_position": 1435,
+          "length": 874,
+          "page_count": 2
+        },
+        {
+          "type": "invoice",
+          "start_position": 1435,
+          "end_position": 1969,
+          "length": 534,
+          "page_count": 1
+        }
+      ]
+    },
+    {
+      "filename": "test_multi_doc_5.pdf",
+      "document_count": 3,
+      "document_types": [
+        "rfi",
+        "submittal",
+        "change_order"
+      ],
+      "total_pages": 3,
+      "boundaries": [
+        {
+          "position": 464,
+          "previous_doc": "rfi",
+          "next_doc": "submittal",
+          "confidence": 1.0
+        },
+        {
+          "position": 792,
+          "previous_doc": "submittal",
+          "next_doc": "change_order",
+          "confidence": 1.0
+        }
+      ],
+      "documents": [
+        {
+          "type": "rfi",
+          "start_position": 0,
+          "end_position": 413,
+          "length": 413,
+          "page_count": 1
+        },
+        {
+          "type": "submittal",
+          "start_position": 413,
+          "end_position": 741,
+          "length": 328,
+          "page_count": 1
+        },
+        {
+          "type": "change_order",
+          "start_position": 741,
+          "end_position": 1072,
+          "length": 331,
+          "page_count": 1
+        }
+      ]
+    },
+    {
+      "filename": "test_multi_doc_6.pdf",
+      "document_count": 4,
+      "document_types": [
+        "email",
+        "meeting_minutes",
+        "change_order",
+        "daily_report"
+      ],
+      "total_pages": 4,
+      "boundaries": [
+        {
+          "position": 469,
+          "previous_doc": "email",
+          "next_doc": "meeting_minutes",
+          "confidence": 1.0
+        },
+        {
+          "position": 1088,
+          "previous_doc": "meeting_minutes",
+          "next_doc": "change_order",
+          "confidence": 1.0
+        },
+        {
+          "position": 1420,
+          "previous_doc": "change_order",
+          "next_doc": "daily_report",
+          "confidence": 1.0
+        }
+      ],
+      "documents": [
+        {
+          "type": "email",
+          "start_position": 0,
+          "end_position": 418,
+          "length": 418,
+          "page_count": 1
+        },
+        {
+          "type": "meeting_minutes",
+          "start_position": 418,
+          "end_position": 1037,
+          "length": 619,
+          "page_count": 1
+        },
+        {
+          "type": "change_order",
+          "start_position": 1037,
+          "end_position": 1369,
+          "length": 332,
+          "page_count": 1
+        },
+        {
+          "type": "daily_report",
+          "start_position": 1369,
+          "end_position": 1905,
+          "length": 536,
+          "page_count": 1
+        }
+      ]
+    },
+    {
+      "filename": "test_multi_doc_7.pdf",
+      "document_count": 5,
+      "document_types": [
+        "letter",
+        "invoice",
+        "email",
+        "submittal",
+        "rfi"
+      ],
+      "total_pages": 6,
+      "boundaries": [
+        {
+          "position": 876,
+          "previous_doc": "letter",
+          "next_doc": "invoice",
+          "confidence": 1.0
+        },
+        {
+          "position": 1799,
+          "previous_doc": "invoice",
+          "next_doc": "email",
+          "confidence": 1.0
+        },
+        {
+          "position": 2504,
+          "previous_doc": "email",
+          "next_doc": "submittal",
+          "confidence": 1.0
+        },
+        {
+          "position": 2835,
+          "previous_doc": "submittal",
+          "next_doc": "rfi",
+          "confidence": 1.0
+        }
+      ],
+      "documents": [
+        {
+          "type": "letter",
+          "start_position": 0,
+          "end_position": 825,
+          "length": 825,
+          "page_count": 1
+        },
+        {
+          "type": "invoice",
+          "start_position": 825,
+          "end_position": 1748,
+          "length": 923,
+          "page_count": 2
+        },
+        {
+          "type": "email",
+          "start_position": 1748,
+          "end_position": 2453,
+          "length": 705,
+          "page_count": 1
+        },
+        {
+          "type": "submittal",
+          "start_position": 2453,
+          "end_position": 2784,
+          "length": 331,
+          "page_count": 1
+        },
+        {
+          "type": "rfi",
+          "start_position": 2784,
+          "end_position": 3214,
+          "length": 430,
+          "page_count": 1
+        }
+      ]
+    },
+    {
+      "filename": "test_multi_doc_8.pdf",
+      "document_count": 8,
+      "document_types": [
+        "meeting_minutes",
+        "daily_report",
+        "change_order",
+        "invoice",
+        "email",
+        "rfi",
+        "submittal",
+        "letter"
+      ],
+      "total_pages": 13,
+      "boundaries": [
+        {
+          "position": 1106,
+          "previous_doc": "meeting_minutes",
+          "next_doc": "daily_report",
+          "confidence": 1.0
+        },
+        {
+          "position": 1917,
+          "previous_doc": "daily_report",
+          "next_doc": "change_order",
+          "confidence": 1.0
+        },
+        {
+          "position": 2247,
+          "previous_doc": "change_order",
+          "next_doc": "invoice",
+          "confidence": 1.0
+        },
+        {
+          "position": 3123,
+          "previous_doc": "invoice",
+          "next_doc": "email",
+          "confidence": 1.0
+        },
+        {
+          "position": 4135,
+          "previous_doc": "email",
+          "next_doc": "rfi",
+          "confidence": 1.0
+        },
+        {
+          "position": 4541,
+          "previous_doc": "rfi",
+          "next_doc": "submittal",
+          "confidence": 1.0
+        },
+        {
+          "position": 4876,
+          "previous_doc": "submittal",
+          "next_doc": "letter",
+          "confidence": 1.0
+        }
+      ],
+      "documents": [
+        {
+          "type": "meeting_minutes",
+          "start_position": 0,
+          "end_position": 1055,
+          "length": 1055,
+          "page_count": 3
+        },
+        {
+          "type": "daily_report",
+          "start_position": 1055,
+          "end_position": 1866,
+          "length": 811,
+          "page_count": 2
+        },
+        {
+          "type": "change_order",
+          "start_position": 1866,
+          "end_position": 2196,
+          "length": 330,
+          "page_count": 1
+        },
+        {
+          "type": "invoice",
+          "start_position": 2196,
+          "end_position": 3072,
+          "length": 876,
+          "page_count": 2
+        },
+        {
+          "type": "email",
+          "start_position": 3072,
+          "end_position": 4084,
+          "length": 1012,
+          "page_count": 2
+        },
+        {
+          "type": "rfi",
+          "start_position": 4084,
+          "end_position": 4490,
+          "length": 406,
+          "page_count": 1
+        },
+        {
+          "type": "submittal",
+          "start_position": 4490,
+          "end_position": 4825,
+          "length": 335,
+          "page_count": 1
+        },
+        {
+          "type": "letter",
+          "start_position": 4825,
+          "end_position": 5664,
+          "length": 839,
+          "page_count": 1
+        }
+      ]
+    }
+  ]
+}
